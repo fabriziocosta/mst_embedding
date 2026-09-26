@@ -17,3 +17,6 @@ venv/
 
 # macOS metadata
 .DS_Store
+
+# Generated interactive notebook export
+notebooks/digits_3d_interactive.html
