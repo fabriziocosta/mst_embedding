@@ -54,6 +54,8 @@ and Plotly controls to rotate the learned embedding.
 The [interactive 2D notebook](notebooks/digits_2d_interactive.ipynb) adds
 sliders for sample count and embedding parameters; it requires the notebook
 extras, including `ipywidgets`.
+The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
+runs and plots 2D MST embeddings across several image datasets.
 
 The estimator exposes `fit`, `fit_transform`, and `transform`. Since the
 coordinates are optimized jointly for all training samples, `transform` returns

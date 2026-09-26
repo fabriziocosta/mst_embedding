@@ -170,13 +170,16 @@ def display_interactive_mst_3d(
         raise ValueError("initial_sample_count must be at least 500.")
     initial_sample_count = min(initial_sample_count, max_instances)
 
+    status = widgets.HTML(value="Loading stratified MNIST sample pool...")
+    display(status)
     X_pool, labels_pool = _load_balanced_pool(max_instances, random_state)
     max_instances = len(X_pool)
     initial_sample_count = min(initial_sample_count, max_instances)
     minimum_sample_count = min(500, max_instances)
-    print(
+    status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"The sample-count slider starts at {initial_sample_count:,}."
+        f"Default selection: {initial_sample_count:,} samples, 8 MSTs, "
+        "1,000 epochs. Click Fit 3D embedding to run."
     )
 
     sample_count = widgets.IntSlider(
@@ -282,6 +285,7 @@ def display_interactive_mst_3d(
 
     def fit_and_display(_=None):
         fit_button.disabled = True
+        status.value = "Fitting the 3D embedding with the selected settings..."
         with output:
             clear_output(wait=True)
             try:
@@ -305,7 +309,9 @@ def display_interactive_mst_3d(
                 )
                 display(figure)
                 display(summary)
+                status.value = "Embedding ready. Adjust the sliders and fit again."
             except Exception:
+                status.value = "The fit failed; see the error details below."
                 traceback.print_exc()
             finally:
                 fit_button.disabled = False
@@ -326,6 +332,7 @@ def display_interactive_mst_3d(
         "fit_button": fit_button,
         "reset_button": reset_button,
         "output": output,
+        "status": status,
         "sliders": {
             "sample_count": sample_count,
             "n_msts": n_msts,
