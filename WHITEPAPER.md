@@ -230,6 +230,14 @@ scale are not otherwise fixed. Interpret the embedding through relative
 relationships and visual patterns, rather than as a coordinate system with
 absolute units.
 
+For flattened grayscale images, the package also provides
+`ImagePatchRandomProjection`. In an sklearn pipeline it can follow
+`StandardScaler`: it reshapes each row into an image, tiles non-overlapping
+patches, projects every patch with one shared seeded Gaussian matrix, and
+flattens the projected patches. The default grid contains 5 rows and 5 columns
+of patches, each projected to 10 values. Image borders are zero-padded after
+normalization as needed to form a regular grid.
+
 ## 7. Computational cost
 
 The pairwise distance matrix requires quadratic memory in the number of

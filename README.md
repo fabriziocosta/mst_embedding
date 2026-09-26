@@ -47,6 +47,30 @@ embedding_3d = IteratedMinimumSpanningTreeEmbedder(
 assert embedding_3d.shape == (len(X), 3)
 ```
 
+For flattened single-channel images, `ImagePatchRandomProjection` can reduce
+features after normalization while retaining local pixel layout. It splits
+each image into a grid of non-overlapping patches, applies one shared random
+projection to every patch, and flattens the projected patches for IMSTE. The
+default grid is 5×5 patches and each patch maps to 10 values; incomplete border
+patches are zero-padded.
+
+```python
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from mst_embedding import (
+    ImagePatchRandomProjection,
+    IteratedMinimumSpanningTreeEmbedder,
+)
+
+image_pipeline = make_pipeline(
+    StandardScaler(),
+    ImagePatchRandomProjection(n_patches=5, n_components=10, random_state=42),
+    IteratedMinimumSpanningTreeEmbedder(random_state=42),
+)
+embedding = image_pipeline.fit_transform(X)
+```
+
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
 2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)

@@ -16,15 +16,22 @@ import torch
 from IPython.display import display
 from sklearn.datasets import fetch_openml, get_data_home
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts the repository root on sys.path.
-    from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+    from mst_embedding import (
+        ImagePatchRandomProjection,
+        IteratedMinimumSpanningTreeEmbedder,
+    )
 except ModuleNotFoundError:  # Also support importing as notebooks.high_dim_mst_gallery.
-    from ..mst_embedding import IteratedMinimumSpanningTreeEmbedder
+    from ..mst_embedding import (
+        ImagePatchRandomProjection,
+        IteratedMinimumSpanningTreeEmbedder,
+    )
 
 
-def _stratified_standardized_sample(
+def _stratified_sample(
     X: object,
     labels: object,
     *,
@@ -42,7 +49,7 @@ def _stratified_standardized_sample(
         )
         X = X[indices]
         labels = labels[indices]
-    return StandardScaler().fit_transform(np.asarray(X, dtype=np.float64)), labels
+    return X, labels
 
 
 def _load_openml(name: str) -> tuple[np.ndarray, np.ndarray]:
@@ -147,7 +154,7 @@ def _load_datasets(max_samples: int, random_state: int):
         print(f"Loading {name} ...", flush=True)
         try:
             raw_X, raw_labels = loader()
-            X, labels = _stratified_standardized_sample(
+            X, labels = _stratified_sample(
                 raw_X,
                 raw_labels,
                 max_samples=max_samples,
@@ -175,6 +182,8 @@ def _default_device() -> str:
 def run_high_dim_mst_gallery(
     *,
     max_samples: int = 1000,
+    n_patches: int | tuple[int, int] = 5,
+    patch_n_components: int = 10,
     n_msts: int = 8,
     n_epochs: int = 1000,
     batch_size: int = 4096,
@@ -183,9 +192,10 @@ def run_high_dim_mst_gallery(
 ) -> dict[str, object]:
     """Fit and display 2D IMSTE embeddings for several image datasets.
 
-    Dataset loading, standardization, fitting, and plotting happen here so the
-    notebook can remain a thin launcher. Failed remote dataset loads are
-    reported and skipped; successful fits are plotted as they finish.
+    Dataset loading, normalization, patch projection, fitting, and plotting
+    happen here so the notebook can remain a thin launcher. Failed remote
+    dataset loads are reported and skipped; successful fits are plotted as
+    they finish.
     """
     if max_samples < 10:
         raise ValueError("max_samples must be at least 10.")
@@ -196,28 +206,53 @@ def run_high_dim_mst_gallery(
     summaries = []
     for name, (X, labels) in datasets.items():
         print(f"Fitting {name} on {resolved_device} ...", flush=True)
-        estimator = IteratedMinimumSpanningTreeEmbedder(
-            n_msts=n_msts,
-            n_components=2,
-            n_epochs=n_epochs,
-            batch_size=batch_size,
-            learning_rate=0.05,
-            negative_ratio=4,
-            lambda_rep=1.0,
-            rank_weight_exponent=1.0,
-            random_state=random_state,
-            device=resolved_device,
+        pipeline = Pipeline(
+            [
+                ("normalize", StandardScaler()),
+                (
+                    "patch_projection",
+                    ImagePatchRandomProjection(
+                        n_patches=n_patches,
+                        n_components=patch_n_components,
+                        random_state=random_state,
+                    ),
+                ),
+                (
+                    "imste",
+                    IteratedMinimumSpanningTreeEmbedder(
+                        n_msts=n_msts,
+                        n_components=2,
+                        n_epochs=n_epochs,
+                        batch_size=batch_size,
+                        learning_rate=0.05,
+                        negative_ratio=4,
+                        lambda_rep=1.0,
+                        rank_weight_exponent=1.0,
+                        random_state=random_state,
+                        device=resolved_device,
+                    ),
+                ),
+            ]
         )
         started = time.perf_counter()
-        embedding = estimator.fit_transform(X)
+        embedding = pipeline.fit_transform(X)
         elapsed = time.perf_counter() - started
-        print(f"  fit completed in {elapsed:.2f} seconds", flush=True)
+        print(f"  pipeline completed in {elapsed:.2f} seconds", flush=True)
+        projection = pipeline.named_steps["patch_projection"]
+        estimator = pipeline.named_steps["imste"]
+        print(
+            f"  preprocessing output: {embedding.shape[0]:,} samples × "
+            f"{projection.n_features_out_:,} features "
+            f"({projection.n_patches_} patches × {projection.n_components} components)",
+            flush=True,
+        )
         embeddings[name] = embedding
         summaries.append(
             {
                 "dataset": name,
                 "samples": len(X),
-                "features": X.shape[1],
+                "input_features": X.shape[1],
+                "preprocessed_features": projection.n_features_out_,
                 "classes": len(np.unique(labels)),
                 "n_msts": n_msts,
                 "n_epochs": n_epochs,
@@ -237,7 +272,8 @@ def run_high_dim_mst_gallery(
             linewidths=0,
         )
         ax.set_title(
-            f"{name} — {len(X):,} samples × {X.shape[1]:,} features; "
+            f"{name} — {len(X):,} samples × "
+            f"{projection.n_features_out_:,} projected features; "
             f"{n_msts} MSTs; {n_epochs} epochs; {elapsed:.2f} s"
         )
         ax.set_xlabel("Embedding dimension 1")
