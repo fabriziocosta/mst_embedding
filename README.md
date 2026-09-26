@@ -86,6 +86,9 @@ sliders for sample count and embedding parameters; it requires the notebook
 extras, including `ipywidgets`.
 The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
 runs and plots 2D IMSTE embeddings across several image datasets.
+The [hierarchical quality notebook](notebooks/hierarchical_quality.ipynb)
+compares edge recovery, trustworthiness, 5-NN accuracy, runtime, and plots
+against exact IMSTE across several cluster counts.
 
 The estimator exposes `fit`, `fit_transform`, and `transform`. Since the
 coordinates are optimized jointly for all training samples, `transform` returns

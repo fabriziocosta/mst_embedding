@@ -251,6 +251,11 @@ def run_high_dim_mst_gallery(
         print(f"  pipeline completed in {elapsed:.2f} seconds", flush=True)
         projection = pipeline.named_steps["patch_projection"]
         estimator = pipeline.named_steps["imste"]
+        mst_summary = (
+            f"{n_local_msts} local / {n_coarse_msts} coarse MSTs"
+            if graph_mode == "hierarchical"
+            else f"{n_msts} MSTs"
+        )
         patch_height, patch_width = projection.patch_shape_
         patch_channels = projection.image_shape_[2]
         patch_grid = (projection.n_patch_rows_, projection.n_patch_columns_)
@@ -282,13 +287,14 @@ def run_high_dim_mst_gallery(
                 "position_encoding_size": projection.position_encoding_size_,
                 "features_per_patch": projection.n_features_per_patch_,
                 "classes": len(np.unique(labels)),
-                "n_msts": n_msts,
+                "n_msts": n_msts if graph_mode == "exact" else None,
                 "graph_mode": graph_mode,
                 "n_clusters": n_clusters if graph_mode == "hierarchical" else None,
                 "n_coarse_msts": n_coarse_msts if graph_mode == "hierarchical" else None,
                 "n_local_msts": n_local_msts if graph_mode == "hierarchical" else None,
                 "minibatch_size": minibatch_size if graph_mode == "hierarchical" else None,
                 "n_epochs": n_epochs,
+                "unique_graph_edges": len(estimator.graph_edges_),
                 "seconds": elapsed,
                 "device": estimator.device_,
             }
@@ -307,7 +313,8 @@ def run_high_dim_mst_gallery(
         ax.set_title(
             f"{name} — {len(X):,} samples × "
             f"{projection.n_features_out_:,} projected features; "
-            f"{graph_mode} graph; {n_msts} MSTs; {n_epochs} epochs; {elapsed:.2f} s"
+            f"{graph_mode} graph; {mst_summary}; "
+            f"{n_epochs} epochs; {elapsed:.2f} s"
         )
         ax.set_xlabel("Embedding dimension 1")
         ax.set_ylabel("Embedding dimension 2")
