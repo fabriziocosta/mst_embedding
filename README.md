@@ -32,7 +32,7 @@ indices, _ = train_test_split(
     random_state=42, stratify=mnist.target,
 )
 X = StandardScaler().fit_transform(
-    np.asarray(mnist.data, dtype=np.float32)[indices] / 255.0
+    np.asarray(mnist.data, dtype=np.float32)[indices]
 )
 
 embedding = IteratedMSTEmbedding(random_state=42).fit_transform(X)

@@ -59,7 +59,7 @@ def load_mnist_data(sample_size=2000, random_state=42):
             X = X[selected]
             labels = labels[selected]
 
-    X = StandardScaler().fit_transform(X / 255.0)
+    X = StandardScaler().fit_transform(X)
     return X, labels
 
 
