@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import time
-import json
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 from plotly.colors import qualitative
-from IPython.display import HTML
 from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
@@ -135,92 +132,46 @@ def fit_and_plot_mst_3d(
 
 
 def render_with_camera_fog(figure, embedding, labels, min_opacity=0.16, max_opacity=0.95):
-    """Render a Plotly 3D figure with camera-aware point fading.
-
-    Plotly's 3D scatter opacity is trace-wide, so the post-script updates each
-    point's RGBA color as the camera moves. The effect is recomputed while the
-    user rotates or zooms the scene.
-    """
+    """Return a FigureWidget with point fading linked to its live camera."""
     if not 0 <= min_opacity <= max_opacity <= 1:
         raise ValueError("opacity bounds must satisfy 0 <= min_opacity <= max_opacity <= 1")
-    coordinates_json = json.dumps(np.asarray(embedding).tolist(), separators=(",", ":"))
-    labels_json = json.dumps(np.asarray(labels, dtype=int).tolist(), separators=(",", ":"))
+    coordinates = np.asarray(embedding, dtype=float)
+    labels = np.asarray(labels, dtype=int)
+    mins = coordinates.min(axis=0)
+    spans = coordinates.max(axis=0) - mins
+    spans[spans == 0] = 1.0
+    normalized = 2.0 * (coordinates - mins) / spans - 1.0
     palette_rgb = [
-        [int(color[index:index + 2], 16) for index in (1, 3, 5)]
+        tuple(int(color[index:index + 2], 16) for index in (1, 3, 5))
         for color in qualitative.Plotly
     ]
-    palette_json = json.dumps(palette_rgb, separators=(",", ":"))
-    post_script = f"""
-const gd = document.getElementById('{{plot_id}}');
-const points = {coordinates_json};
-const labels = {labels_json};
-const palette = {palette_json};
-const minAlpha = {float(min_opacity)};
-const maxAlpha = {float(max_opacity)};
-let scheduled = false;
+    widget = go.FigureWidget(figure)
 
-function updateDepthFog() {{
-  scheduled = false;
-  const scene = gd._fullLayout && gd._fullLayout.scene;
-  const camera = scene && scene.camera;
-  if (!camera) return;
-  const eye = camera.eye || {{x: 1.25, y: 1.25, z: 1.25}};
-  const center = camera.center || {{x: 0, y: 0, z: 0}};
-  const length = Math.hypot(eye.x, eye.y, eye.z) || 1;
-  const view = [eye.x / length, eye.y / length, eye.z / length];
-  const axes = [scene.xaxis, scene.yaxis, scene.zaxis];
-  const ranges = axes.map((axis, dimension) => {{
-    const range = axis && axis.range;
-    if (range && range.length === 2 && range[0] !== range[1]) return range;
-    let low = Infinity;
-    let high = -Infinity;
-    for (let index = 0; index < points.length; index++) {{
-      low = Math.min(low, points[index][dimension]);
-      high = Math.max(high, points[index][dimension]);
-    }}
-    return [low, high];
-  }});
-  const normalized = points.map(point => point.map((value, dimension) => {{
-    const range = ranges[dimension];
-    return 2 * (value - range[0]) / (range[1] - range[0] || 1) - 1;
-  }}));
-  const depths = normalized.map(point =>
-    (point[0] - center.x) * view[0] +
-    (point[1] - center.y) * view[1] +
-    (point[2] - center.z) * view[2]
-  );
-  let far = Infinity;
-  let near = -Infinity;
-  for (let index = 0; index < depths.length; index++) {{
-    far = Math.min(far, depths[index]);
-    near = Math.max(near, depths[index]);
-  }}
-  const span = near - far || 1;
-  const colors = labels.map((label, index) => {{
-    const opacity = minAlpha + (maxAlpha - minAlpha) *
-      Math.pow((depths[index] - far) / span, 0.8);
-    const [r, g, b] = palette[label % palette.length];
-    return `rgba(${{r}},${{g}},${{b}},${{opacity.toFixed(3)}})`;
-  }});
-  Plotly.restyle(gd, {{'marker.color': [colors]}}, [0]);
-}}
+    def update_depth_fog(scene, camera):
+        del scene
+        eye = getattr(camera, "eye", None)
+        center = getattr(camera, "center", None)
+        eye = np.array([
+            getattr(eye, axis, None) or default
+            for axis, default in zip(("x", "y", "z"), (1.25, 1.25, 1.25))
+        ], dtype=float)
+        center = np.array([
+            getattr(center, axis, None) or 0.0
+            for axis in ("x", "y", "z")
+        ], dtype=float)
+        direction = eye / (np.linalg.norm(eye) or 1.0)
+        depths = (normalized - center) @ direction
+        depth_span = np.ptp(depths) or 1.0
+        proximity = (depths - depths.min()) / depth_span
+        opacity = min_opacity + (max_opacity - min_opacity) * np.power(proximity, 0.8)
+        colors = [
+            f"rgba({r},{g},{b},{alpha:.3f})"
+            for (r, g, b), alpha in zip(
+                (palette_rgb[label % len(palette_rgb)] for label in labels), opacity
+            )
+        ]
+        widget.data[0].marker.color = colors
 
-function scheduleFogUpdate() {{
-  if (!scheduled) {{
-    scheduled = true;
-    setTimeout(updateDepthFog, points.length > 10000 ? 100 : 25);
-  }}
-}}
-
-gd.on('plotly_relayouting', scheduleFogUpdate);
-gd.on('plotly_relayout', scheduleFogUpdate);
-updateDepthFog();
-"""
-    html = pio.to_html(
-        figure,
-        include_plotlyjs="cdn",
-        full_html=False,
-        config={"responsive": True, "scrollZoom": True},
-        post_script=post_script,
-    )
-    return HTML(html)
+    widget.layout.scene.on_change(update_depth_fog, "camera")
+    update_depth_fog(widget.layout.scene, widget.layout.scene.camera)
+    return widget
