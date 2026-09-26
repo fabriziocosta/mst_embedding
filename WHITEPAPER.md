@@ -1,8 +1,8 @@
-# Iterated Minimum Spanning Tree Embedding
+# IMSTE: Iterated Minimum Spanning Tree Embedding
 
 ## Abstract
 
-Iterated Minimum Spanning Tree (IMST) Embedding is an unsupervised method for
+Iterated Minimum Spanning Tree Embedding (IMSTE) is an unsupervised method for
 placing a finite set of high-dimensional observations in a lower-dimensional
 coordinate space. It builds a weighted graph by repeatedly finding a minimum
 spanning tree (MST) and removing its edges before finding the next tree. The
@@ -23,7 +23,7 @@ embedding methods.
 ## 1. Motivation and scope
 
 An embedding aims to represent relationships among observations with fewer
-coordinates than the original feature space. IMST Embedding represents those
+coordinates than the original feature space. IMSTE represents those
 relationships through a hierarchy of spanning trees. The first tree connects
 each sample to the dataset through the shortest possible total edge length.
 After its edges are removed, the next tree must use different connections.
@@ -212,12 +212,12 @@ not passed into the estimator's optimization.
 from sklearn.datasets import load_digits
 from sklearn.preprocessing import StandardScaler
 
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 digits = load_digits()
 X = StandardScaler().fit_transform(digits.data)
 
-embedding = IteratedMSTEmbedding(
+embedding = IteratedMinimumSpanningTreeEmbedder(
     n_msts=8,
     n_components=2,
     random_state=42,
@@ -304,7 +304,7 @@ optimizing new points; it is not part of this algorithm's current interface.
 
 ## 10. Summary
 
-IMST Embedding constructs a rank-weighted union of edge-disjoint minimum
+IMSTE constructs a rank-weighted union of edge-disjoint minimum
 spanning trees and learns low-dimensional coordinates by balancing attraction
 along graph edges against sampled repulsion between graph non-neighbors. The
 approach is compact and easy to inspect, with its main tradeoff being the

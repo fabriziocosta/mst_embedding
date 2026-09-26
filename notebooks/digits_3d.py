@@ -1,4 +1,4 @@
-"""Interactive 3D MST embedding visualization for the MNIST notebook."""
+"""Interactive 3D IMSTE visualization for the MNIST notebook."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ try:  # Notebook execution puts this directory directly on sys.path.
     from digits_sweep import format_duration, load_mnist_data
 except ModuleNotFoundError:  # Also support importing as notebooks.digits_3d.
     from .digits_sweep import format_duration, load_mnist_data
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
 def fit_and_plot_mst_3d(
@@ -38,7 +38,7 @@ def fit_and_plot_mst_3d(
     trustworthiness_neighbors=10,
     rank_weight_exponent=1.0,
 ):
-    """Fit one 3D MST embedding and return its scores and Plotly figure."""
+    """Fit one 3D IMSTE embedding and return its scores and Plotly figure."""
     X = np.asarray(X)
     labels = np.asarray(labels)
     if X.ndim != 2 or len(X) != len(labels):
@@ -46,7 +46,7 @@ def fit_and_plot_mst_3d(
     if len(X) < 25:
         raise ValueError("At least 25 samples are required for 5-fold 5-NN scoring")
 
-    estimator = IteratedMSTEmbedding(
+    estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=n_msts,
         rank_weight_exponent=rank_weight_exponent,
         n_components=3,
@@ -60,7 +60,7 @@ def fit_and_plot_mst_3d(
         device=device,
     )
     print(
-        f"Fitting 3D MST embedding with n_msts={n_msts}, "
+        f"Fitting 3D IMSTE embedding with n_msts={n_msts}, "
         f"rank_weight_exponent={rank_weight_exponent} ...",
         flush=True,
     )
@@ -76,7 +76,7 @@ def fit_and_plot_mst_3d(
     ).mean()
     elapsed_text = format_duration(elapsed)
     print(
-        f"Finished 3D MST embedding in {elapsed_text} on {estimator.device_}",
+        f"Finished 3D IMSTE embedding in {elapsed_text} on {estimator.device_}",
         flush=True,
     )
 
@@ -108,7 +108,7 @@ def fit_and_plot_mst_3d(
     )
     figure.update_layout(
         title=(
-            f"3D Iterated MST embedding (n_msts={n_msts})<br>"
+            f"3D IMSTE (n_msts={n_msts})<br>"
             f"trustworthiness={score:.3f}; 5-NN CV={knn_accuracy:.3f}; "
             f"runtime={elapsed_text} ({estimator.device_})"
         ),
@@ -163,7 +163,7 @@ def display_interactive_mst_3d(
     initial_sample_count=1000,
     random_state=42,
 ):
-    """Display sliders for a 3D MST embedding and fit on button click."""
+    """Display sliders for a 3D IMSTE embedding and fit on button click."""
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
     if initial_sample_count < 500:

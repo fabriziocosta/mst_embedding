@@ -1,4 +1,4 @@
-"""Scikit-learn estimator for an iterated-MST embedding."""
+"""Scikit-learn estimator for IMSTE embeddings."""
 
 from __future__ import annotations
 
@@ -112,8 +112,8 @@ def _iterated_mst_edges(
     return edge_array, weight_array
 
 
-class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
-    """Embed a dataset using edge-disjoint minimum spanning trees.
+class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
+    """Embed a dataset with IMSTE using edge-disjoint minimum spanning trees.
 
     The learned coordinates are attached to the training rows. Since the
     objective jointly optimizes all rows, this estimator does not define an
@@ -191,7 +191,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         self.attraction_loss_fn = attraction_loss_fn
         self.repulsion_loss_fn = repulsion_loss_fn
 
-    def fit(self, X: object, y: object = None) -> "IteratedMSTEmbedding":
+    def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows."""
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)

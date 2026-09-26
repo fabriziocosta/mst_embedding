@@ -1,4 +1,4 @@
-"""Load, embed, and visualize several high-dimensional image datasets."""
+"""Load datasets and visualize their high-dimensional IMSTE embeddings."""
 
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts the repository root on sys.path.
-    from mst_embedding import IteratedMSTEmbedding
+    from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 except ModuleNotFoundError:  # Also support importing as notebooks.high_dim_mst_gallery.
-    from ..mst_embedding import IteratedMSTEmbedding
+    from ..mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
 def _stratified_standardized_sample(
@@ -123,7 +123,15 @@ def _load_cifar10() -> tuple[np.ndarray, np.ndarray]:
             images.append(batch[b"data"])
             labels.extend(batch[b"labels"])
 
-    return np.concatenate(images), np.asarray(labels, dtype=np.int64)
+    images = np.concatenate(images)
+    rgb_planes = images.reshape(len(images), 3, 32 * 32)
+    grayscale_images = np.einsum(
+        "ncp,c->np",
+        rgb_planes,
+        np.asarray([0.299, 0.587, 0.114], dtype=np.float32),
+        dtype=np.float32,
+    )
+    return grayscale_images, np.asarray(labels, dtype=np.int64)
 
 
 def _load_datasets(max_samples: int, random_state: int):
@@ -131,7 +139,7 @@ def _load_datasets(max_samples: int, random_state: int):
         "MNIST (28×28)": lambda: _load_openml("mnist_784"),
         "Fashion-MNIST (28×28)": lambda: _load_openml("Fashion-MNIST"),
         "Kuzushiji-MNIST (28×28)": _load_kmnist,
-        "CIFAR-10 (32×32 RGB)": _load_cifar10,
+        "CIFAR-10 grayscale (32×32)": _load_cifar10,
     }
     datasets = {}
     errors = {}
@@ -173,7 +181,7 @@ def run_high_dim_mst_gallery(
     random_state: int = 42,
     device: str | None = None,
 ) -> dict[str, object]:
-    """Fit and display 2D MST embeddings for several image datasets.
+    """Fit and display 2D IMSTE embeddings for several image datasets.
 
     Dataset loading, standardization, fitting, and plotting happen here so the
     notebook can remain a thin launcher. Failed remote dataset loads are
@@ -188,7 +196,7 @@ def run_high_dim_mst_gallery(
     summaries = []
     for name, (X, labels) in datasets.items():
         print(f"Fitting {name} on {resolved_device} ...", flush=True)
-        estimator = IteratedMSTEmbedding(
+        estimator = IteratedMinimumSpanningTreeEmbedder(
             n_msts=n_msts,
             n_components=2,
             n_epochs=n_epochs,

@@ -24,7 +24,7 @@ _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
 def load_mnist_data(sample_size=2000, random_state=42):
@@ -79,7 +79,7 @@ def format_duration(seconds: float) -> str:
 def _fit_and_score(X, labels, parameter, value, base_params, n_neighbors):
     params = dict(base_params)
     params[parameter] = value
-    estimator = IteratedMSTEmbedding(**params)
+    estimator = IteratedMinimumSpanningTreeEmbedder(**params)
     started = time.perf_counter()
     print(f"Fitting {parameter}={value} ...", flush=True)
     embedding = estimator.fit_transform(X)
@@ -115,7 +115,7 @@ def run_sweep(X, labels, parameter, values, base_params, n_neighbors=10, n_jobs=
     worker count modest because each fit builds a dense pairwise distance matrix.
     Returns result dictionaries (including embeddings) and a summary DataFrame.
     """
-    if parameter not in IteratedMSTEmbedding().get_params():
+    if parameter not in IteratedMinimumSpanningTreeEmbedder().get_params():
         raise ValueError(f"Unknown estimator parameter: {parameter!r}")
     if not values:
         raise ValueError("values must contain at least one candidate")

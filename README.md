@@ -1,7 +1,7 @@
-# Iterated MST Embedding
+# IMSTE: Iterated Minimum Spanning Tree Embedding
 
-`mst-embedding` provides a scikit-learn-compatible transformer that learns an
-embedding from a union of edge-disjoint minimum spanning trees. It defaults to
+`mst-embedding` provides IMSTE, a scikit-learn-compatible transformer that
+learns an embedding from a union of edge-disjoint minimum spanning trees. It defaults to
 two dimensions and supports other output dimensions through `n_components`.
 It follows the algorithm described in [IDEA.md](IDEA.md).
 For a detailed explanation of the approach, see the [whitepaper](WHITEPAPER.md).
@@ -26,7 +26,7 @@ from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
 indices, _ = train_test_split(
@@ -37,11 +37,11 @@ X = StandardScaler().fit_transform(
     np.asarray(mnist.data, dtype=np.float32)[indices]
 )
 
-embedding = IteratedMSTEmbedding(random_state=42).fit_transform(X)
+embedding = IteratedMinimumSpanningTreeEmbedder(random_state=42).fit_transform(X)
 assert embedding.shape == (len(X), 2)
 
 # Request 3D coordinates for interactive visualization.
-embedding_3d = IteratedMSTEmbedding(
+embedding_3d = IteratedMinimumSpanningTreeEmbedder(
     n_components=3, random_state=42
 ).fit_transform(X)
 assert embedding_3d.shape == (len(X), 3)
@@ -56,7 +56,7 @@ The [interactive 2D notebook](notebooks/digits_2d_interactive.ipynb) adds
 sliders for sample count and embedding parameters; it requires the notebook
 extras, including `ipywidgets`.
 The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
-runs and plots 2D MST embeddings across several image datasets.
+runs and plots 2D IMSTE embeddings across several image datasets.
 
 The estimator exposes `fit`, `fit_transform`, and `transform`. Since the
 coordinates are optimized jointly for all training samples, `transform` returns
@@ -82,12 +82,12 @@ repulsion:
 
 ```python
 import torch
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 def quadratic_attraction(positive_squared_distances, edge_weights):
     return torch.mean(edge_weights * positive_squared_distances)
 
-embedding = IteratedMSTEmbedding(
+embedding = IteratedMinimumSpanningTreeEmbedder(
     attraction_loss_fn=quadratic_attraction,
 ).fit_transform(X)
 ```

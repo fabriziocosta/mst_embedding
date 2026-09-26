@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mst-embedding"
 version = "0.1.0"
-description = "A scikit-learn transformer based on iterated minimum spanning trees"
+description = "A scikit-learn transformer for IMSTE embeddings"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

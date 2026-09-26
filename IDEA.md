@@ -1,4 +1,4 @@
-Implement a simple embedding algorithm based on repeated minimum spanning trees.
+IMSTE (Iterated Minimum Spanning Tree Embedding) is an unsupervised method based on repeated minimum spanning trees.
 The original/default output is 2D; `n_components` generalizes the optimized
 coordinate matrix to other dimensions, including 3D for interactive plots.
 
@@ -14,7 +14,7 @@ Input:
 
 The algorithm has two stages: graph construction and coordinate optimization.
 
-## 1. Construct the iterated-MST graph
+## 1. Construct the IMSTE graph
 
 Compute the full pairwise Euclidean distance matrix:
 
@@ -134,7 +134,7 @@ For each positive source node `i`, sample random nodes `j_neg` uniformly from th
 
 Reject a sampled pair if:
 - `i == j_neg`, or
-- `(i, j_neg)` is already an edge in the iterated-MST graph.
+- `(i, j_neg)` is already an edge in the IMSTE graph.
 
 For every accepted negative pair compute
 

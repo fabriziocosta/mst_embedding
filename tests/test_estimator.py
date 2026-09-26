@@ -3,7 +3,7 @@ import pytest
 import torch
 from sklearn.base import clone
 
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
 def small_data():
@@ -14,7 +14,7 @@ def small_data():
 
 
 def test_sklearn_api_and_training_transform():
-    estimator = IteratedMSTEmbedding(
+    estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=1, n_epochs=3, batch_size=4, random_state=7
     )
     assert clone(estimator).get_params() == estimator.get_params()
@@ -31,14 +31,14 @@ def test_sklearn_api_and_training_transform():
 def test_seed_reproduces_embedding():
     X = small_data()
     params = dict(n_msts=1, n_epochs=4, batch_size=3, random_state=13)
-    first = IteratedMSTEmbedding(**params).fit_transform(X)
-    second = IteratedMSTEmbedding(**params).fit_transform(X)
+    first = IteratedMinimumSpanningTreeEmbedder(**params).fit_transform(X)
+    second = IteratedMinimumSpanningTreeEmbedder(**params).fit_transform(X)
     np.testing.assert_array_equal(first, second)
 
 
 def test_transform_rejects_new_or_reordered_rows():
     X = small_data()
-    estimator = IteratedMSTEmbedding(n_msts=1, n_epochs=0).fit(X)
+    estimator = IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0).fit(X)
     with pytest.raises(ValueError, match="original training rows"):
         estimator.transform(X[::-1])
     with pytest.raises(ValueError, match="original training rows"):
@@ -47,7 +47,7 @@ def test_transform_rejects_new_or_reordered_rows():
 
 def test_duplicate_samples_keep_zero_distance_mst_edges():
     X = np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-    estimator = IteratedMSTEmbedding(n_msts=1, n_epochs=2, random_state=2).fit(X)
+    estimator = IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=2, random_state=2).fit(X)
     assert estimator.graph_edges_.shape == (len(X) - 1, 2)
     assert np.isfinite(estimator.embedding_).all()
 
@@ -55,12 +55,12 @@ def test_duplicate_samples_keep_zero_distance_mst_edges():
 def test_insufficient_edge_disjoint_msts_raise_clear_error():
     X = np.array([[0.0], [1.0]])
     with pytest.raises(ValueError, match="Reduce n_msts"):
-        IteratedMSTEmbedding(n_msts=2, n_epochs=0).fit(X)
+        IteratedMinimumSpanningTreeEmbedder(n_msts=2, n_epochs=0).fit(X)
 
 
 def test_no_eligible_negative_pairs_is_supported():
     X = np.array([[0.0], [1.0]])
-    estimator = IteratedMSTEmbedding(n_msts=1, n_epochs=2, random_state=3).fit(X)
+    estimator = IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=2, random_state=3).fit(X)
     assert estimator.embedding_.shape == (2, 2)
     assert np.isfinite(estimator.embedding_).all()
 
@@ -70,7 +70,7 @@ def test_no_eligible_negative_pairs_is_supported():
     reason="PyTorch MPS is unavailable",
 )
 def test_mps_device_runs_when_available():
-    estimator = IteratedMSTEmbedding(
+    estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=1, n_epochs=2, random_state=5, device="mps"
     ).fit(small_data())
     assert estimator.device_ == "mps"
@@ -90,7 +90,7 @@ def test_mps_device_runs_when_available():
     ],
 )
 def test_invalid_parameters_raise_value_error(parameter, value):
-    estimator = IteratedMSTEmbedding(n_msts=1, n_epochs=0)
+    estimator = IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0)
     setattr(estimator, parameter, value)
     with pytest.raises(ValueError):
         estimator.fit(small_data())
@@ -98,6 +98,6 @@ def test_invalid_parameters_raise_value_error(parameter, value):
 
 def test_invalid_data_raise_clear_error():
     with pytest.raises(ValueError, match="at least two samples"):
-        IteratedMSTEmbedding(n_msts=1, n_epochs=0).fit([[1.0, 2.0]])
+        IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0).fit([[1.0, 2.0]])
     with pytest.raises(ValueError):
-        IteratedMSTEmbedding(n_msts=1, n_epochs=0).fit([[0.0], [np.nan]])
+        IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0).fit([[0.0], [np.nan]])

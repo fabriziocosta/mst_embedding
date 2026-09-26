@@ -18,7 +18,7 @@ try:  # Notebook execution puts this directory directly on sys.path.
     from digits_sweep import load_mnist_data
 except ModuleNotFoundError:  # Also support importing as notebooks.digits_2d.
     from .digits_sweep import load_mnist_data
-from mst_embedding import IteratedMSTEmbedding
+from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
 def _load_balanced_pool(max_instances: int, random_state: int) -> tuple[np.ndarray, np.ndarray]:
@@ -185,7 +185,7 @@ def display_interactive_embedding(
                 n_samples = sample_count.value
                 X = X_pool[:n_samples]
                 labels = labels_pool[:n_samples]
-                estimator = IteratedMSTEmbedding(
+                estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     rank_weight_exponent=rank_exponent.value,
                     n_components=2,
@@ -228,7 +228,7 @@ def display_interactive_embedding(
                 )
                 ax.set(
                     title=(
-                        f"2D MST embedding · {n_samples:,} samples · "
+                        f"2D IMSTE · {n_samples:,} samples · "
                         f"{n_msts.value} MSTs · α={rank_exponent.value:g} · "
                         f"{n_epochs.value} epochs{knn_title}"
                     ),

@@ -1,4 +1,4 @@
-"""Default differentiable losses for iterated-MST embeddings."""
+"""Default differentiable losses for IMSTE."""
 
 import torch
 
