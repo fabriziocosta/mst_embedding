@@ -56,7 +56,7 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=4`, `rank_weight_exponent=1.0`,
+The main parameters are `n_msts=8`, `rank_weight_exponent=1.0`,
 `n_components=2`, `n_epochs=500`, `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as

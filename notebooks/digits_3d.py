@@ -31,6 +31,7 @@ def fit_and_plot_mst_3d(
     random_state=42,
     device="auto",
     trustworthiness_neighbors=10,
+    rank_weight_exponent=1.0,
 ):
     """Fit one 3D MST embedding and return its scores and Plotly figure."""
     X = np.asarray(X)
@@ -42,6 +43,7 @@ def fit_and_plot_mst_3d(
 
     estimator = IteratedMSTEmbedding(
         n_msts=n_msts,
+        rank_weight_exponent=rank_weight_exponent,
         n_components=3,
         n_epochs=n_epochs,
         batch_size=batch_size,
@@ -52,7 +54,11 @@ def fit_and_plot_mst_3d(
         random_state=random_state,
         device=device,
     )
-    print(f"Fitting 3D MST embedding with n_msts={n_msts} ...", flush=True)
+    print(
+        f"Fitting 3D MST embedding with n_msts={n_msts}, "
+        f"rank_weight_exponent={rank_weight_exponent} ...",
+        flush=True,
+    )
     started = time.perf_counter()
     embedding = estimator.fit_transform(X)
     elapsed = time.perf_counter() - started

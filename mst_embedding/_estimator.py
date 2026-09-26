@@ -110,7 +110,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    n_msts : int, default=4
+    n_msts : int, default=8
         Number of edge-disjoint minimum spanning trees to construct.
     rank_weight_exponent : float, default=1.0
         Exponent controlling how edge weights decay with MST rank. An edge
@@ -142,7 +142,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
 
     def __init__(
         self,
-        n_msts: int = 4,
+        n_msts: int = 8,
         n_components: int = 2,
         n_epochs: int = 500,
         batch_size: int = 4096,
