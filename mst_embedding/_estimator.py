@@ -99,7 +99,7 @@ def _iterated_mst_edges(distances: np.ndarray, n_msts: int) -> tuple[np.ndarray,
 
 
 class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
-    """Embed a dataset in two dimensions using edge-disjoint minimum trees.
+    """Embed a dataset using edge-disjoint minimum spanning trees.
 
     The learned coordinates are attached to the training rows. Since the
     objective jointly optimizes all rows, this estimator does not define an
@@ -110,6 +110,8 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
     ----------
     n_msts : int, default=4
         Number of edge-disjoint minimum spanning trees to construct.
+    n_components : int, default=2
+        Number of embedding coordinates per sample.
     n_epochs : int, default=500
         Number of optimization epochs.
     batch_size : int, default=4096
@@ -134,6 +136,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
     def __init__(
         self,
         n_msts: int = 4,
+        n_components: int = 2,
         n_epochs: int = 500,
         batch_size: int = 4096,
         learning_rate: float = 0.05,
@@ -144,6 +147,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         device: str = "auto",
     ) -> None:
         self.n_msts = n_msts
+        self.n_components = n_components
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -157,6 +161,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         """Fit the embedding and store coordinates for the input rows."""
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)
+        n_components = _positive_integer("n_components", self.n_components)
         n_epochs = _positive_integer("n_epochs", self.n_epochs, allow_zero=True)
         batch_size = _positive_integer("batch_size", self.batch_size)
         negative_ratio = _positive_integer(
@@ -185,7 +190,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         seed = int(rng.randint(0, np.iinfo(np.int32).max))
         torch_generator.manual_seed(seed)
         initial = torch.randn(
-            (n_samples, 2), generator=torch_generator, dtype=compute_dtype
+            (n_samples, n_components), generator=torch_generator, dtype=compute_dtype
         ).to(compute_device)
         coordinates = torch.nn.Parameter(initial * 1e-3)
         optimizer = torch.optim.Adam([coordinates], lr=learning_rate)

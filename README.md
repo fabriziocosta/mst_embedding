@@ -1,7 +1,8 @@
 # Iterated MST Embedding
 
-`mst-embedding` provides a scikit-learn-compatible transformer that learns a
-two-dimensional embedding from a union of edge-disjoint minimum spanning trees.
+`mst-embedding` provides a scikit-learn-compatible transformer that learns an
+embedding from a union of edge-disjoint minimum spanning trees. It defaults to
+two dimensions and supports other output dimensions through `n_components`.
 It follows the algorithm described in [IDEA.md](IDEA.md).
 
 ## Install
@@ -37,6 +38,12 @@ X = StandardScaler().fit_transform(
 
 embedding = IteratedMSTEmbedding(random_state=42).fit_transform(X)
 assert embedding.shape == (len(X), 2)
+
+# Request 3D coordinates for interactive visualization.
+embedding_3d = IteratedMSTEmbedding(
+    n_components=3, random_state=42
+).fit_transform(X)
+assert embedding_3d.shape == (len(X), 3)
 ```
 
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
@@ -48,7 +55,7 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=4`, `n_epochs=500`, `batch_size=4096`,
+The main parameters are `n_msts=4`, `n_components=2`, `n_epochs=500`, `batch_size=4096`,
 `learning_rate=0.05`, `negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`,
 `random_state=42`, and `device="auto"`. On macOS, `auto` uses PyTorch's MPS
 backend for datasets with at least 2,048 samples; smaller workloads use the CPU
