@@ -245,6 +245,39 @@ grid.
 
 ## 7. Computational cost
 
+### Hierarchical approximation
+
+The optional `graph_mode="hierarchical"` reduces the regions compared during
+graph construction while leaving the embedding objective unchanged. It runs
+MiniBatchKMeans, constructs the usual IMST over cluster centroids, and for every
+coarse edge `(a, b)` constructs the ordinary IMST on the original samples in
+`C_a ∪ C_b`. These independent local computations run in parallel and are
+mapped back to global sample indices:
+
+```text
+MiniBatchKMeans
+    ↓
+IMST over cluster centroids
+    ↓
+for every centroid edge (a,b):
+    IMST over C_a ∪ C_b
+    ↓
+parallel execution
+    ↓
+set union of global sample edges
+    ↓
+existing IMSTE embedding objective
+```
+
+MiniBatchKMeans only restricts which regions are compared. All final graph
+edges connect original observations. A sample edge can be found by more than
+one local problem; duplicate discoveries are canonicalized as undirected edges
+and included once, with the strongest (maximum) rank weight. A local problem
+that becomes disconnected contributes the ranks it successfully constructed.
+This approximation can reduce local distance-matrix sizes, though cost depends
+on cluster sizes and the number of coarse edges. The exact graph remains the
+default.
+
 The pairwise distance matrix requires quadratic memory in the number of
 samples:
 

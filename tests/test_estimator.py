@@ -2,8 +2,11 @@ import numpy as np
 import pytest
 import torch
 from sklearn.base import clone
+from sklearn.cluster import MiniBatchKMeans
+from scipy.spatial.distance import cdist
 
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from mst_embedding._estimator import _hierarchical_imst_edges, _iterated_mst_edges
 
 
 def small_data():
@@ -101,3 +104,108 @@ def test_invalid_data_raise_clear_error():
         IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0).fit([[1.0, 2.0]])
     with pytest.raises(ValueError):
         IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0).fit([[0.0], [np.nan]])
+
+
+def hierarchical_data():
+    rng = np.random.RandomState(12)
+    return np.vstack([rng.normal(loc=i * 4.0, scale=0.3, size=(8, 3)) for i in range(4)])
+
+
+def test_hierarchical_embedding_and_indices_are_valid():
+    X = hierarchical_data()
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        graph_mode="hierarchical", n_clusters=4, n_coarse_msts=1,
+        n_local_msts=2, n_epochs=2, random_state=4,
+    ).fit(X)
+    assert estimator.embedding_.shape == (len(X), 2)
+    assert np.isfinite(estimator.embedding_).all()
+    assert estimator.graph_edges_.ndim == 2 and estimator.graph_edges_.shape[1] == 2
+    assert np.all((estimator.graph_edges_ >= 0) & (estimator.graph_edges_ < len(X)))
+    canonical = [tuple(sorted(edge)) for edge in estimator.graph_edges_]
+    assert len(canonical) == len(set(canonical))
+    assert estimator.cluster_labels_.shape == (len(X),)
+    assert estimator.cluster_centers_.shape == (4, X.shape[1])
+
+
+def test_hierarchical_parallel_is_reproducible_and_exact_default_unchanged():
+    X = hierarchical_data()
+    params = dict(
+        graph_mode="hierarchical", n_clusters=4, n_coarse_msts=1,
+        n_local_msts=2, n_epochs=0, random_state=19,
+    )
+    serial = IteratedMinimumSpanningTreeEmbedder(n_jobs=1, **params).fit(X)
+    parallel = IteratedMinimumSpanningTreeEmbedder(n_jobs=2, **params).fit(X)
+    np.testing.assert_array_equal(serial.graph_edges_, parallel.graph_edges_)
+    np.testing.assert_array_equal(serial.graph_weights_, parallel.graph_weights_)
+    np.testing.assert_array_equal(serial.cluster_labels_, parallel.cluster_labels_)
+    exact = IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=0).fit(X)
+    expected, weights = _iterated_mst_edges(cdist(X, X), 1, 1.0)
+    np.testing.assert_array_equal(exact.graph_edges_, expected)
+    np.testing.assert_array_equal(exact.graph_weights_, weights)
+
+
+def test_hierarchical_cluster_and_pair_reproducibility_and_union_edges():
+    X = hierarchical_data()
+    first = MiniBatchKMeans(n_clusters=4, random_state=23, batch_size=8).fit(X)
+    second = MiniBatchKMeans(n_clusters=4, random_state=23, batch_size=8).fit(X)
+    np.testing.assert_array_equal(first.labels_, second.labels_)
+    np.testing.assert_array_equal(first.cluster_centers_, second.cluster_centers_)
+    edges, weights = _hierarchical_imst_edges(
+        X, first.labels_, first.cluster_centers_, 4, 1, 2, 1.0, 1
+    )
+    coarse, _ = _iterated_mst_edges(cdist(first.cluster_centers_, first.cluster_centers_), 1)
+    assert len(coarse) > 0
+    # Each pair union's tree naturally includes edges internal to a cluster
+    # alongside edges crossing the two endpoint clusters.
+    a, b = coarse[0]
+    pair = np.flatnonzero((first.labels_ == a) | (first.labels_ == b))
+    assert any(first.labels_[u] == first.labels_[v] for u, v in edges if u in pair and v in pair)
+    assert any(first.labels_[u] != first.labels_[v] for u, v in edges if u in pair and v in pair)
+    assert np.isfinite(weights).all()
+
+
+def test_duplicate_discoveries_use_set_union_and_strongest_weight(monkeypatch):
+    import mst_embedding._estimator as estimator_module
+
+    class InlineParallel:
+        def __init__(self, n_jobs):
+            assert n_jobs == 1
+
+        def __call__(self, jobs):
+            return [func(*args, **kwargs) for func, args, kwargs in jobs]
+
+    results = iter([
+        (np.array([[1, 0], [2, 1]]), np.array([0.5, 0.25])),
+        (np.array([[0, 1], [3, 4]]), np.array([1.0, 0.25])),
+    ])
+    monkeypatch.setattr(estimator_module, "Parallel", InlineParallel)
+    monkeypatch.setattr(estimator_module, "_local_cluster_pair_imst", lambda *args: next(results))
+    X = np.arange(10, dtype=float).reshape(5, 2)
+    labels = np.array([0, 0, 1, 2, 2])
+    centers = np.array([[0., 0.], [1., 1.], [2., 2.]])
+    # Coarse chain yields two local jobs sharing cluster 0 only after replacing
+    # its edge list with the two desired adjacent pairs.
+    monkeypatch.setattr(
+        estimator_module, "_iterated_mst_edges",
+        lambda *args, **kwargs: (np.array([[0, 1], [0, 2]]), np.ones(2)),
+    )
+    edges, weights = _hierarchical_imst_edges(
+        X, labels, centers, 3, 1, 2, 1.0, 1
+    )
+    np.testing.assert_array_equal(edges, [[0, 1], [1, 2], [3, 4]])
+    np.testing.assert_array_equal(weights, [1.0, 0.25, 0.25])
+    assert len(edges) == 3
+
+
+def test_hierarchical_zero_distance_and_singletons_are_supported():
+    X = np.array([[0., 0.], [0., 0.], [10., 0.], [20., 0.]])
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        graph_mode="hierarchical", n_clusters=3, n_coarse_msts=1,
+        n_local_msts=8, minibatch_size=2, n_epochs=0, random_state=2, n_jobs=1,
+    ).fit(X)
+    assert np.isfinite(estimator.graph_weights_).all()
+    assert np.isfinite(estimator.embedding_).all()
+    assert estimator.graph_edges_.size == 0 or np.all(estimator.graph_edges_[:, 0] != estimator.graph_edges_[:, 1])
+    assert len({tuple(edge) for edge in estimator.graph_edges_}) == len(estimator.graph_edges_)
+    assert (0, 1) in {tuple(sorted(map(int, edge))) for edge in estimator.graph_edges_}
+    assert len(estimator.cluster_sample_indices_) == 3

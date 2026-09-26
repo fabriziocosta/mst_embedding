@@ -103,6 +103,49 @@ because GPU launch overhead was higher for a smaller handwritten-digits dataset.
 Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
 selected backend is available as `estimator.device_` after fitting.
 
+## Hierarchical graph construction
+
+The exact IMSTE graph remains the default. For larger datasets, select the
+optional hierarchical approximation:
+
+```python
+embedding = IteratedMinimumSpanningTreeEmbedder(
+    graph_mode="hierarchical",
+    n_clusters=100,
+    n_coarse_msts=4,
+    n_local_msts=8,
+    n_jobs=-1,
+    minibatch_size=1024,
+    random_state=42,
+).fit_transform(X)
+```
+
+Its graph construction follows:
+
+```text
+MiniBatchKMeans
+    ↓
+IMST over cluster centroids
+    ↓
+for every centroid edge (a,b):
+    IMST over C_a ∪ C_b
+    ↓
+parallel execution
+    ↓
+set union of global sample edges
+    ↓
+existing IMSTE embedding objective
+```
+
+MiniBatchKMeans only limits which dataset regions are compared. The final graph
+contains edges between original observations, including intra-cluster edges
+that arise within each cluster-pair union. Local graphs can rediscover the
+same undirected sample edge; the estimator keeps one copy with its strongest
+(earliest-rank) weight. Fitted diagnostics include `cluster_labels_`,
+`cluster_centers_`, `coarse_graph_edges_`, `graph_edges_`, and `graph_weights_`.
+The [comparison script](notebooks/compare_exact_hierarchical.py) measures graph
+construction and total runtime over several cluster counts.
+
 The attraction and repulsion losses can be replaced independently with
 `attraction_loss_fn` and `repulsion_loss_fn`. Each callable must return a scalar
 PyTorch tensor that remains differentiable with respect to its distance input.

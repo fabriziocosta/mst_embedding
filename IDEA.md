@@ -14,6 +14,34 @@ Input:
 
 The algorithm has two stages: graph construction and coordinate optimization.
 
+### Optional hierarchical approximation
+
+`graph_mode="hierarchical"` replaces only graph construction. MiniBatchKMeans
+partitions the observations; its centroids are connected with the ordinary
+edge-disjoint IMST routine. For every coarse centroid edge `(a, b)`, the
+ordinary local IMST is then run on the complete union `C_a ∪ C_b`, using the
+original observations. Independent local problems can run in parallel.
+
+```text
+MiniBatchKMeans
+    ↓
+IMST over cluster centroids
+    ↓
+for every centroid edge (a,b):
+    IMST over C_a ∪ C_b
+    ↓
+parallel execution
+    ↓
+set union of global sample edges
+    ↓
+existing IMSTE embedding objective
+```
+
+Clustering restricts which regions are compared; every final edge still joins
+two original observations. Local problems may rediscover an undirected edge.
+The result is a set union: duplicate edges appear once and keep the strongest
+local rank weight. The exact graph remains the default mode.
+
 ## 1. Construct the IMSTE graph
 
 Compute the full pairwise Euclidean distance matrix:

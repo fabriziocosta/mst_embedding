@@ -9,7 +9,9 @@ from collections.abc import Callable
 import numpy as np
 import torch
 from scipy.spatial.distance import cdist
+from joblib import Parallel, delayed
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.cluster import MiniBatchKMeans
 from sklearn.utils.validation import check_array, check_is_fitted
 
 from .losses import inverse_distance_repulsion_loss, log_attraction_loss
@@ -66,7 +68,11 @@ def _validate_loss_output(name: str, value: object) -> torch.Tensor:
 
 
 def _iterated_mst_edges(
-    distances: np.ndarray, n_msts: int, rank_weight_exponent: float = 1.0
+    distances: np.ndarray,
+    n_msts: int,
+    rank_weight_exponent: float = 1.0,
+    *,
+    allow_partial: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return edge-disjoint MSTs, preserving zero-distance edges.
 
@@ -79,15 +85,20 @@ def _iterated_mst_edges(
     weights: list[float] = []
 
     for rank in range(1, n_msts + 1):
+        rank_edge_start = len(edges)
         in_tree = np.zeros(n_samples, dtype=bool)
         best = np.full(n_samples, np.inf, dtype=np.float64)
         parent = np.full(n_samples, -1, dtype=np.intp)
         best[0] = 0.0
+        completed = True
 
         for _ in range(n_samples):
             candidates = np.where(in_tree, np.inf, best)
             node = int(np.argmin(candidates))
             if not np.isfinite(candidates[node]):
+                if allow_partial:
+                    completed = False
+                    break
                 raise ValueError(
                     f"Could not construct MST {rank}: removing earlier trees left "
                     "the available graph disconnected. Reduce n_msts."
@@ -106,10 +117,75 @@ def _iterated_mst_edges(
             improve = connectable & (distances[node] < best)
             best[improve] = distances[node, improve]
             parent[improve] = node
+        if not completed:
+            del edges[rank_edge_start:]
+            del weights[rank_edge_start:]
+            break
 
     edge_array = np.asarray(edges, dtype=np.intp).reshape(-1, 2)
     weight_array = np.asarray(weights, dtype=np.float64)
     return edge_array, weight_array
+
+
+def _local_cluster_pair_imst(
+    X: np.ndarray,
+    sample_indices: np.ndarray,
+    n_local_msts: int,
+    rank_weight_exponent: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build the local IMST on the union of two clusters, in global indices."""
+    if sample_indices.size < 2:
+        return np.empty((0, 2), dtype=np.intp), np.empty(0, dtype=np.float64)
+    local_X = X[sample_indices]
+    distances = cdist(local_X, local_X, metric="euclidean")
+    if not np.isfinite(distances).all():
+        raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
+    np.fill_diagonal(distances, 0.0)
+    local_edges, weights = _iterated_mst_edges(
+        distances, n_local_msts, rank_weight_exponent, allow_partial=True
+    )
+    return sample_indices[local_edges], weights
+
+
+def _hierarchical_imst_edges(
+    X: np.ndarray,
+    cluster_labels: np.ndarray,
+    cluster_centers: np.ndarray,
+    n_clusters: int,
+    n_coarse_msts: int,
+    n_local_msts: int,
+    rank_weight_exponent: float,
+    n_jobs: int,
+    coarse_edges: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build centroid IMSTs then union parallel IMSTs over adjacent clusters."""
+    members = [np.flatnonzero(cluster_labels == cluster) for cluster in range(n_clusters)]
+    if coarse_edges is None:
+        coarse_distances = cdist(cluster_centers, cluster_centers, metric="euclidean")
+        np.fill_diagonal(coarse_distances, 0.0)
+        coarse_edges, _ = _iterated_mst_edges(
+            coarse_distances, n_coarse_msts, rank_weight_exponent
+        )
+    jobs = [
+        delayed(_local_cluster_pair_imst)(
+            X,
+            np.concatenate((members[a], members[b])),
+            n_local_msts,
+            rank_weight_exponent,
+        )
+        for a, b in coarse_edges
+    ]
+    local_results = Parallel(n_jobs=n_jobs)(jobs)
+
+    strongest_weight: dict[tuple[int, int], float] = {}
+    for edges, weights in local_results:
+        for (u, v), weight in zip(edges, weights):
+            key = (int(min(u, v)), int(max(u, v)))
+            strongest_weight[key] = max(strongest_weight.get(key, -np.inf), float(weight))
+    ordered_edges = sorted(strongest_weight)
+    edges = np.asarray(ordered_edges, dtype=np.intp).reshape(-1, 2)
+    weights = np.asarray([strongest_weight[e] for e in ordered_edges], dtype=np.float64)
+    return edges, weights
 
 
 class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
@@ -129,6 +205,18 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         first appearing in rank ``r`` receives weight ``r**(-rank_weight_exponent)``.
         Set to 0 for equal weights across ranks; the default of 1 gives the
         original inverse-rank weighting.
+    graph_mode : {'exact', 'hierarchical'}, default='exact'
+        Select the exact graph or a MiniBatchKMeans-based hierarchical approximation.
+    n_clusters : int, default=100
+        Number of MiniBatchKMeans clusters for hierarchical graph construction.
+    n_coarse_msts : int, default=4
+        Number of edge-disjoint MSTs over cluster centroids.
+    n_local_msts : int, default=8
+        Number of edge-disjoint MSTs requested for each adjacent cluster pair.
+    n_jobs : int, default=-1
+        Parallel workers used for independent local graph construction.
+    minibatch_size : int, default=1024
+        MiniBatchKMeans batch size.
     n_components : int, default=2
         Number of embedding coordinates per sample.
     n_epochs : int, default=1000
@@ -176,6 +264,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
         | None = None,
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
+        graph_mode: str = "exact",
+        n_clusters: int = 100,
+        n_coarse_msts: int = 4,
+        n_local_msts: int = 8,
+        n_jobs: int = -1,
+        minibatch_size: int = 1024,
     ) -> None:
         self.n_msts = n_msts
         self.rank_weight_exponent = rank_weight_exponent
@@ -190,6 +284,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.device = device
         self.attraction_loss_fn = attraction_loss_fn
         self.repulsion_loss_fn = repulsion_loss_fn
+        self.graph_mode = graph_mode
+        self.n_clusters = n_clusters
+        self.n_coarse_msts = n_coarse_msts
+        self.n_local_msts = n_local_msts
+        self.n_jobs = n_jobs
+        self.minibatch_size = minibatch_size
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows."""
@@ -209,6 +309,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         )
         lambda_rep = _finite_nonnegative("lambda_rep", self.lambda_rep)
         epsilon = _finite_nonnegative("epsilon", self.epsilon, strictly_positive=True)
+        if self.graph_mode not in {"exact", "hierarchical"}:
+            raise ValueError("graph_mode must be 'exact' or 'hierarchical'.")
         if self.attraction_loss_fn is not None and not callable(self.attraction_loss_fn):
             raise ValueError("attraction_loss_fn must be callable or None.")
         if self.repulsion_loss_fn is not None and not callable(self.repulsion_loss_fn):
@@ -230,13 +332,59 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         compute_device = _resolve_device(self.device, n_samples)
         compute_dtype = torch.float32 if compute_device.type == "mps" else torch.float64
 
-        distances = cdist(X_checked, X_checked, metric="euclidean")
-        if not np.isfinite(distances).all():
-            raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
-        np.fill_diagonal(distances, 0.0)
-        edges, edge_weights = _iterated_mst_edges(
-            distances, n_msts, rank_weight_exponent
-        )
+        if self.graph_mode == "exact":
+            distances = cdist(X_checked, X_checked, metric="euclidean")
+            if not np.isfinite(distances).all():
+                raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
+            np.fill_diagonal(distances, 0.0)
+            edges, edge_weights = _iterated_mst_edges(
+                distances, n_msts, rank_weight_exponent
+            )
+            self.cluster_labels_ = None
+            self.cluster_centers_ = None
+            self.cluster_sample_indices_ = None
+            self.coarse_graph_edges_ = None
+            self.n_unique_local_edges_ = None
+            self.n_duplicate_local_edges_ = None
+        else:
+            n_clusters = _positive_integer("n_clusters", self.n_clusters)
+            n_coarse_msts = _positive_integer("n_coarse_msts", self.n_coarse_msts)
+            n_local_msts = _positive_integer("n_local_msts", self.n_local_msts)
+            minibatch_size = _positive_integer("minibatch_size", self.minibatch_size)
+            if n_clusters < 2:
+                raise ValueError("n_clusters must be at least 2 for hierarchical mode.")
+            kmeans = MiniBatchKMeans(
+                n_clusters=n_clusters,
+                random_state=self.random_state,
+                batch_size=minibatch_size,
+            )
+            labels = kmeans.fit_predict(X_checked)
+            coarse_distances = cdist(kmeans.cluster_centers_, kmeans.cluster_centers_)
+            if not np.isfinite(coarse_distances).all():
+                raise ValueError("Centroid distances overflowed; rescale X before fitting.")
+            np.fill_diagonal(coarse_distances, 0.0)
+            coarse_edges = _iterated_mst_edges(
+                coarse_distances, n_coarse_msts, rank_weight_exponent
+            )[0]
+            edges, edge_weights = _hierarchical_imst_edges(
+                X_checked,
+                labels,
+                kmeans.cluster_centers_,
+                n_clusters,
+                n_coarse_msts,
+                n_local_msts,
+                rank_weight_exponent,
+                self.n_jobs,
+                coarse_edges=coarse_edges,
+            )
+            self.cluster_labels_ = labels.copy()
+            self.cluster_centers_ = kmeans.cluster_centers_.copy()
+            self.cluster_sample_indices_ = [
+                np.flatnonzero(labels == cluster) for cluster in range(n_clusters)
+            ]
+            self.coarse_graph_edges_ = coarse_edges.copy()
+            self.n_unique_local_edges_ = int(edges.shape[0])
+            self.n_duplicate_local_edges_ = None
 
         rng = np.random.RandomState(self.random_state)
         torch_generator = torch.Generator(device="cpu")
