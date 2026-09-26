@@ -131,14 +131,8 @@ def _load_cifar10() -> tuple[np.ndarray, np.ndarray]:
             labels.extend(batch[b"labels"])
 
     images = np.concatenate(images)
-    rgb_planes = images.reshape(len(images), 3, 32 * 32)
-    grayscale_images = np.einsum(
-        "ncp,c->np",
-        rgb_planes,
-        np.asarray([0.299, 0.587, 0.114], dtype=np.float32),
-        dtype=np.float32,
-    )
-    return grayscale_images, np.asarray(labels, dtype=np.int64)
+    rgb_images = images.reshape(len(images), 3, 32, 32).transpose(0, 2, 3, 1)
+    return rgb_images.reshape(len(images), -1), np.asarray(labels, dtype=np.int64)
 
 
 def _load_datasets(max_samples: int, random_state: int):
@@ -146,7 +140,7 @@ def _load_datasets(max_samples: int, random_state: int):
         "MNIST (28×28)": lambda: _load_openml("mnist_784"),
         "Fashion-MNIST (28×28)": lambda: _load_openml("Fashion-MNIST"),
         "Kuzushiji-MNIST (28×28)": _load_kmnist,
-        "CIFAR-10 grayscale (32×32)": _load_cifar10,
+        "CIFAR-10 RGB (32×32×3)": _load_cifar10,
     }
     datasets = {}
     errors = {}
@@ -184,6 +178,7 @@ def run_high_dim_mst_gallery(
     max_samples: int = 1000,
     n_patches: int | tuple[int, int] = 5,
     patch_n_components: int = 10,
+    position_encoding_size: int | None = None,
     n_msts: int = 8,
     n_epochs: int = 1000,
     batch_size: int = 4096,
@@ -214,6 +209,10 @@ def run_high_dim_mst_gallery(
                     ImagePatchRandomProjection(
                         n_patches=n_patches,
                         n_components=patch_n_components,
+                        position_encoding_size=position_encoding_size,
+                        image_shape=(32, 32, 3)
+                        if name.startswith("CIFAR-10")
+                        else None,
                         random_state=random_state,
                     ),
                 ),
@@ -240,10 +239,20 @@ def run_high_dim_mst_gallery(
         print(f"  pipeline completed in {elapsed:.2f} seconds", flush=True)
         projection = pipeline.named_steps["patch_projection"]
         estimator = pipeline.named_steps["imste"]
+        patch_height, patch_width = projection.patch_shape_
+        patch_channels = projection.image_shape_[2]
+        patch_grid = (projection.n_patch_rows_, projection.n_patch_columns_)
         print(
             f"  preprocessing output: {embedding.shape[0]:,} samples × "
             f"{projection.n_features_out_:,} features "
-            f"({projection.n_patches_} patches × {projection.n_components} components)",
+            f"({projection.n_patches_} patches × "
+            f"{projection.n_features_per_patch_} values per patch)\n"
+            f"  patch features: {projection.n_components} projected + "
+            f"{projection.position_encoding_size_} positional = "
+            f"{projection.n_features_per_patch_} values\n"
+            f"  patch layout: {patch_grid[0]}×{patch_grid[1]} grid; each padded patch "
+            f"is {patch_height}×{patch_width}×{patch_channels} "
+            "(height × width × channels)",
             flush=True,
         )
         embeddings[name] = embedding
@@ -253,6 +262,13 @@ def run_high_dim_mst_gallery(
                 "samples": len(X),
                 "input_features": X.shape[1],
                 "preprocessed_features": projection.n_features_out_,
+                "patch_grid": f"{patch_grid[0]}×{patch_grid[1]}",
+                "padded_patch_shape": (
+                    f"{patch_height}×{patch_width}×{patch_channels}"
+                ),
+                "patch_features": projection.n_components,
+                "position_encoding_size": projection.position_encoding_size_,
+                "features_per_patch": projection.n_features_per_patch_,
                 "classes": len(np.unique(labels)),
                 "n_msts": n_msts,
                 "n_epochs": n_epochs,

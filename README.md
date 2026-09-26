@@ -47,12 +47,17 @@ embedding_3d = IteratedMinimumSpanningTreeEmbedder(
 assert embedding_3d.shape == (len(X), 3)
 ```
 
-For flattened single-channel images, `ImagePatchRandomProjection` can reduce
-features after normalization while retaining local pixel layout. It splits
-each image into a grid of non-overlapping patches, applies one shared random
-projection to every patch, and flattens the projected patches for IMSTE. The
-default grid is 5×5 patches and each patch maps to 10 values; incomplete border
-patches are zero-padded.
+For flattened images, `ImagePatchRandomProjection` can reduce features after
+normalization while retaining local pixel layout. It splits each image into a
+2D grid of non-overlapping spatial patches, flattens all channels within each
+patch, applies one shared random projection to every patch, and flattens the
+projected patches for IMSTE. Set `image_shape=(height, width, channels)` for
+channel-last color images; grayscale images can use `(height, width)` or infer
+a square shape. Each projected patch also receives a fixed 2D sinusoidal
+position vector; `position_encoding_size` controls its length and defaults to
+the projected patch size, doubling the combined per-patch feature count. The
+default grid is 5×5 patches and each patch maps to 10 image features plus 10
+position features; incomplete border patches are zero-padded.
 
 ```python
 from sklearn.pipeline import make_pipeline
