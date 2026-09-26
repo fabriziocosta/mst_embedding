@@ -16,6 +16,7 @@ from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 # Support running from a source checkout without requiring an editable install.
 _project_root = Path(__file__).resolve().parents[1]
@@ -26,7 +27,7 @@ from mst_embedding import IteratedMSTEmbedding
 
 
 def load_mnist_data(sample_size=2000, random_state=42):
-    """Load a stratified MNIST subsample with pixel values scaled to [0, 1].
+    """Load MNIST and standardize features in a stratified subsample.
 
     OpenML caches the full 70,000-row ``mnist_784`` dataset locally after the
     first download. ``sample_size=None`` returns all rows.
@@ -58,7 +59,8 @@ def load_mnist_data(sample_size=2000, random_state=42):
             X = X[selected]
             labels = labels[selected]
 
-    return X / 255.0, labels
+    X = StandardScaler().fit_transform(X / 255.0)
+    return X, labels
 
 
 def format_duration(seconds: float) -> str:
