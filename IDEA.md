@@ -5,6 +5,7 @@ coordinate matrix to other dimensions, including 3D for interactive plots.
 Input:
 - A data matrix `X` of shape `(n_samples, n_features)`.
 - Number of MST iterations `R`.
+- Rank-weight exponent `alpha` (default: 1.0).
 - Number of embedding dimensions `n_components` (default: 2).
 - Number of embedding epochs.
 - Negative sampling ratio.
@@ -43,8 +44,13 @@ At each iteration:
 4. Assign every edge discovered at this iteration the weight
 
 $$
-w_{ij}=\frac{1}{r}.
+w_{ij}=r^{-\alpha},
 $$
+
+where `alpha` controls how quickly later MSTs lose influence. The default
+`alpha=1` gives the original inverse-rank weighting; `alpha=0` gives every
+MST rank equal weight, and larger values reduce the weight of later ranks more
+quickly.
 
 5. Remove the selected MST edges from `D_work` in both directions so that later MSTs cannot reuse them.
 
@@ -56,7 +62,7 @@ for rank in range(1, R + 1):
 
     for (i, j) in T.edges:
         edges.append((i, j))
-        weights.append(1.0 / rank)
+        weights.append(rank ** (-alpha))
 
         D_work[i, j] = 0
         D_work[j, i] = 0
@@ -276,16 +282,16 @@ Do not add:
 - PCA initialization,
 - spectral initialization,
 - graph-distance-2 closure,
-- adaptive rank weighting,
 - distance-dependent edge weighting,
 - class labels during training.
 
-The only graph-edge weight is
+The graph-edge weight depends only on the MST iteration rank:
 
 $$
-w_{ij}=1/r,
+w_{ij}=r^{-\alpha},
 $$
 
-where `r` is the MST iteration in which the edge first appears.
+where `r` is the MST iteration in which the edge first appears and `alpha`
+is the configurable `rank_weight_exponent` parameter (default `1.0`).
 
 The labels are used only for coloring the final visualization.

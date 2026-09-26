@@ -53,7 +53,9 @@ def _resolve_device(requested: str, n_samples: int) -> torch.device:
     return torch.device("cpu")
 
 
-def _iterated_mst_edges(distances: np.ndarray, n_msts: int) -> tuple[np.ndarray, np.ndarray]:
+def _iterated_mst_edges(
+    distances: np.ndarray, n_msts: int, rank_weight_exponent: float = 1.0
+) -> tuple[np.ndarray, np.ndarray]:
     """Return edge-disjoint MSTs, preserving zero-distance edges.
 
     Dense Prim avoids treating zero-weight edges as missing, which is important
@@ -83,7 +85,7 @@ def _iterated_mst_edges(distances: np.ndarray, n_msts: int) -> tuple[np.ndarray,
             if parent[node] != -1:
                 other = int(parent[node])
                 edges.append((other, node))
-                weights.append(1.0 / rank)
+                weights.append(rank ** (-rank_weight_exponent))
                 available[other, node] = False
                 available[node, other] = False
 
@@ -110,6 +112,11 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
     ----------
     n_msts : int, default=4
         Number of edge-disjoint minimum spanning trees to construct.
+    rank_weight_exponent : float, default=1.0
+        Exponent controlling how edge weights decay with MST rank. An edge
+        first appearing in rank ``r`` receives weight ``r**(-rank_weight_exponent)``.
+        Set to 0 for equal weights across ranks; the default of 1 gives the
+        original inverse-rank weighting.
     n_components : int, default=2
         Number of embedding coordinates per sample.
     n_epochs : int, default=500
@@ -145,8 +152,10 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         random_state: int | None = 42,
         epsilon: float = 1e-4,
         device: str = "auto",
+        rank_weight_exponent: float = 1.0,
     ) -> None:
         self.n_msts = n_msts
+        self.rank_weight_exponent = rank_weight_exponent
         self.n_components = n_components
         self.n_epochs = n_epochs
         self.batch_size = batch_size
@@ -161,6 +170,9 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         """Fit the embedding and store coordinates for the input rows."""
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)
+        rank_weight_exponent = _finite_nonnegative(
+            "rank_weight_exponent", self.rank_weight_exponent
+        )
         n_components = _positive_integer("n_components", self.n_components)
         n_epochs = _positive_integer("n_epochs", self.n_epochs, allow_zero=True)
         batch_size = _positive_integer("batch_size", self.batch_size)
@@ -183,7 +195,9 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         if not np.isfinite(distances).all():
             raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
         np.fill_diagonal(distances, 0.0)
-        edges, edge_weights = _iterated_mst_edges(distances, n_msts)
+        edges, edge_weights = _iterated_mst_edges(
+            distances, n_msts, rank_weight_exponent
+        )
 
         rng = np.random.RandomState(self.random_state)
         torch_generator = torch.Generator(device="cpu")
