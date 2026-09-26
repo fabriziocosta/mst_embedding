@@ -10,6 +10,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed, parallel_config
 from sklearn.datasets import load_digits
 from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -43,51 +44,69 @@ def format_duration(seconds: float) -> str:
     return f"{seconds} sec"
 
 
-def run_sweep(X, labels, parameter, values, base_params, n_neighbors=10):
+def _fit_and_score(X, labels, parameter, value, base_params, n_neighbors):
+    params = dict(base_params)
+    params[parameter] = value
+    estimator = IteratedMSTEmbedding(**params)
+    started = time.perf_counter()
+    print(f"Fitting {parameter}={value} ...", flush=True)
+    embedding = estimator.fit_transform(X)
+    elapsed = time.perf_counter() - started
+    print(f"Finished {parameter}={value} in {format_duration(elapsed)}", flush=True)
+
+    score = trustworthiness(
+        X, embedding, n_neighbors=min(n_neighbors, len(X) - 1)
+    )
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    knn_accuracy = cross_val_score(
+        KNeighborsClassifier(n_neighbors=5), embedding, labels, cv=cv
+    ).mean()
+    return {
+        parameter: value,
+        "trustworthiness": score,
+        "5-NN 5-fold CV accuracy": knn_accuracy,
+        "seconds": elapsed,
+        "elapsed": format_duration(elapsed),
+        "embedding": embedding,
+    }
+
+
+def run_sweep(X, labels, parameter, values, base_params, n_neighbors=10, n_jobs=1):
     """Fit and plot one digits embedding per value of an estimator parameter.
 
-    Returns a list of result dictionaries (including each embedding) and a
-    summary DataFrame with runtime and neighborhood/classification scores.
+    Independent parameter values can run in parallel with ``n_jobs``. Keep the
+    worker count modest because each fit builds a dense pairwise distance matrix.
+    Returns result dictionaries (including embeddings) and a summary DataFrame.
     """
     if parameter not in IteratedMSTEmbedding().get_params():
         raise ValueError(f"Unknown estimator parameter: {parameter!r}")
     if not values:
         raise ValueError("values must contain at least one candidate")
 
-    results = []
-    ncols = min(3, len(values))
-    nrows = math.ceil(len(values) / ncols)
+    arguments = (
+        (X, labels, parameter, value, base_params, n_neighbors)
+        for value in values
+    )
+    if n_jobs == 1:
+        results = [_fit_and_score(*args) for args in arguments]
+    else:
+        with parallel_config(backend="loky", inner_max_num_threads=1):
+            results = Parallel(n_jobs=n_jobs, verbose=5)(
+                delayed(_fit_and_score)(*args) for args in arguments
+            )
+
+    ncols = min(3, len(results))
+    nrows = math.ceil(len(results) / ncols)
     fig, axes = plt.subplots(
         nrows, ncols, figsize=(5 * ncols, 4 * nrows), squeeze=False,
         constrained_layout=True,
     )
 
-    for index, value in enumerate(values):
-        params = dict(base_params)
-        params[parameter] = value
-        estimator = IteratedMSTEmbedding(**params)
-        started = time.perf_counter()
-        print(f"Fitting {parameter}={value} ...", flush=True)
-        embedding = estimator.fit_transform(X)
-        elapsed = time.perf_counter() - started
-        print(f"Finished {parameter}={value} in {format_duration(elapsed)}", flush=True)
-
-        score = trustworthiness(
-            X, embedding, n_neighbors=min(n_neighbors, len(X) - 1)
-        )
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        knn_accuracy = cross_val_score(
-            KNeighborsClassifier(n_neighbors=5), embedding, labels, cv=cv
-        ).mean()
-        results.append({
-            parameter: value,
-            "trustworthiness": score,
-            "5-NN 5-fold CV accuracy": knn_accuracy,
-            "seconds": elapsed,
-            "elapsed": format_duration(elapsed),
-            "embedding": embedding,
-        })
-
+    for index, result in enumerate(results):
+        embedding = result["embedding"]
+        value = result[parameter]
+        score = result["trustworthiness"]
+        knn_accuracy = result["5-NN 5-fold CV accuracy"]
         ax = axes.flat[index]
         points = ax.scatter(
             embedding[:, 0], embedding[:, 1], c=labels, cmap="tab10",

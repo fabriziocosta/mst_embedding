@@ -167,10 +167,20 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         adjacency[edge_sources, edge_targets] = True
         adjacency[edge_targets, edge_sources] = True
         sample_ids = np.arange(n_samples)
-        valid_negative_nodes = [
-            np.flatnonzero(~adjacency[i] & (sample_ids != i))
-            for i in range(n_samples)
-        ]
+        negative_counts = np.count_nonzero(
+            ~adjacency & (sample_ids[None, :] != sample_ids[:, None]), axis=1
+        )
+        max_negative_count = int(negative_counts.max(initial=0))
+        index_dtype = np.int32 if n_samples <= np.iinfo(np.int32).max else np.intp
+        negative_candidates = np.empty(
+            (n_samples, max_negative_count), dtype=index_dtype
+        )
+        for sample_id in range(n_samples):
+            candidates = np.flatnonzero(
+                ~adjacency[sample_id] & (sample_ids != sample_id)
+            )
+            negative_candidates[sample_id, : candidates.size] = candidates
+        del adjacency, sample_ids
 
         for _ in range(n_epochs):
             order = rng.permutation(len(edge_array))
@@ -186,17 +196,17 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
                 positive_d2 = torch.sum(positive_delta * positive_delta, dim=1)
                 attraction = torch.mean(weights_t * torch.log1p(positive_d2))
 
-                negative_sources: list[int] = []
-                negative_targets: list[int] = []
-                if negative_ratio:
-                    for source in src:
-                        choices = valid_negative_nodes[int(source)]
-                        if choices.size:
-                            sampled = rng.choice(choices, size=negative_ratio, replace=True)
-                            negative_sources.extend([int(source)] * negative_ratio)
-                            negative_targets.extend(sampled.tolist())
-
-                if negative_sources:
+                eligible_sources = src[negative_counts[src] > 0]
+                if negative_ratio and eligible_sources.size:
+                    eligible_counts = negative_counts[eligible_sources]
+                    sampled_offsets = (
+                        rng.random_sample((eligible_sources.size, negative_ratio))
+                        * eligible_counts[:, None]
+                    ).astype(np.intp)
+                    negative_targets = negative_candidates[
+                        eligible_sources[:, None], sampled_offsets
+                    ].reshape(-1)
+                    negative_sources = np.repeat(eligible_sources, negative_ratio)
                     ni = torch.as_tensor(negative_sources, dtype=torch.long)
                     nj = torch.as_tensor(negative_targets, dtype=torch.long)
                     negative_delta = coordinates[ni] - coordinates[nj]
