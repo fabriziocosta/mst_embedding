@@ -51,21 +51,25 @@ def display_interactive_embedding(
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
-    if not 500 <= initial_sample_count <= max_instances:
-        raise ValueError("initial_sample_count must be between 500 and max_instances.")
+    if initial_sample_count < 500:
+        raise ValueError("initial_sample_count must be at least 500.")
+    initial_sample_count = min(initial_sample_count, max_instances)
 
     status = widgets.HTML(value="Loading stratified MNIST sample pool...")
     display(status)
     X_pool, labels_pool = _load_balanced_pool(max_instances, random_state)
     max_instances = len(X_pool)
+    initial_sample_count = min(initial_sample_count, max_instances)
+    minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Fitting the default embedding with {initial_sample_count:,} samples..."
+        f"Fitting the default embedding with {initial_sample_count:,} samples "
+        "and 10 epochs..."
     )
 
     sample_count = widgets.IntSlider(
         value=initial_sample_count,
-        min=500,
+        min=minimum_sample_count,
         max=max_instances,
         step=250,
         description="Instances",
@@ -91,10 +95,10 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=500,
-        min=100,
+        value=10,
+        min=10,
         max=1000,
-        step=100,
+        step=10,
         description="Epochs",
         continuous_update=False,
         style={"description_width": "initial"},
@@ -150,7 +154,7 @@ def display_interactive_embedding(
         sample_count.value = min(1000, max_instances)
         n_msts.value = 8
         rank_exponent.value = 1.0
-        n_epochs.value = 500
+        n_epochs.value = 10
         learning_rate.value = 0.05
         lambda_rep.value = 1.0
         negative_ratio.value = 4
@@ -170,6 +174,7 @@ def display_interactive_embedding(
                     rank_weight_exponent=rank_exponent.value,
                     n_components=2,
                     n_epochs=n_epochs.value,
+                    batch_size=8192,
                     learning_rate=learning_rate.value,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,

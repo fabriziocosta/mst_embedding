@@ -164,11 +164,14 @@ def display_interactive_mst_3d(
     """Display sliders for a 3D MST embedding and fit on button click."""
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
-    if not 500 <= initial_sample_count <= max_instances:
-        raise ValueError("initial_sample_count must be between 500 and max_instances.")
+    if initial_sample_count < 500:
+        raise ValueError("initial_sample_count must be at least 500.")
+    initial_sample_count = min(initial_sample_count, max_instances)
 
     X_pool, labels_pool = _load_balanced_pool(max_instances, random_state)
     max_instances = len(X_pool)
+    initial_sample_count = min(initial_sample_count, max_instances)
+    minimum_sample_count = min(500, max_instances)
     print(
         f"Balanced pool available: {max_instances:,} samples. "
         f"The sample-count slider starts at {initial_sample_count:,}."
@@ -176,7 +179,7 @@ def display_interactive_mst_3d(
 
     sample_count = widgets.IntSlider(
         value=initial_sample_count,
-        min=500,
+        min=minimum_sample_count,
         max=max_instances,
         step=250,
         description="Instances",
