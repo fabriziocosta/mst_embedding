@@ -119,7 +119,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         original inverse-rank weighting.
     n_components : int, default=2
         Number of embedding coordinates per sample.
-    n_epochs : int, default=500
+    n_epochs : int, default=1000
         Number of optimization epochs.
     batch_size : int, default=4096
         Number of positive edges per optimization step.
@@ -144,7 +144,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         self,
         n_msts: int = 8,
         n_components: int = 2,
-        n_epochs: int = 500,
+        n_epochs: int = 1000,
         batch_size: int = 4096,
         learning_rate: float = 0.05,
         negative_ratio: int = 4,

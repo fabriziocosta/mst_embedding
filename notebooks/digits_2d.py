@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import time
+import sys
 import traceback
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from IPython.display import HTML, clear_output, display
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
@@ -63,8 +65,8 @@ def display_interactive_embedding(
     minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Fitting the default embedding with {initial_sample_count:,} samples "
-        "and 10 epochs..."
+        f"Default selection: {initial_sample_count:,} samples, 8 MSTs, "
+        "1,000 epochs. Click Fit embedding to run."
     )
 
     sample_count = widgets.IntSlider(
@@ -95,7 +97,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=10,
+        value=1000,
         min=10,
         max=1000,
         step=10,
@@ -137,6 +139,19 @@ def display_interactive_embedding(
         description="Estimate 5-fold 5-NN accuracy",
         indent=False,
     )
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps_available = bool(
+        sys.platform == "darwin"
+        and mps_backend is not None
+        and mps_backend.is_available()
+    )
+    device_default = "mps" if mps_available else "auto"
+    device = widgets.Dropdown(
+        options=["auto", "cpu"] + (["mps"] if mps_available else []),
+        value=device_default,
+        description="Device",
+        style={"description_width": "initial"},
+    )
 
     fit_button = widgets.Button(
         description="Fit embedding",
@@ -154,11 +169,12 @@ def display_interactive_embedding(
         sample_count.value = min(1000, max_instances)
         n_msts.value = 8
         rank_exponent.value = 1.0
-        n_epochs.value = 10
+        n_epochs.value = 1000
         learning_rate.value = 0.05
         lambda_rep.value = 1.0
         negative_ratio.value = 4
         compute_knn.value = False
+        device.value = device_default
 
     def fit_and_display(_=None) -> None:
         fit_button.disabled = True
@@ -179,7 +195,7 @@ def display_interactive_embedding(
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
                     random_state=random_state,
-                    device="auto",
+                    device=device.value,
                 )
                 started = time.perf_counter()
                 embedding = estimator.fit_transform(X)
@@ -248,11 +264,10 @@ def display_interactive_embedding(
         [
             widgets.HBox([sample_count, n_msts, rank_exponent]),
             widgets.HBox([n_epochs, learning_rate, lambda_rep, negative_ratio]),
-            widgets.HBox([compute_knn]),
+            widgets.HBox([compute_knn, device]),
         ]
     )
     display(controls, widgets.HBox([fit_button, reset_button]), output)
-    fit_and_display()
 
     return {
         "controls": controls,
@@ -269,5 +284,6 @@ def display_interactive_embedding(
             "lambda_rep": lambda_rep,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
+            "device": device,
         },
     }

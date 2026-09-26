@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+import sys
 import traceback
 
 import ipywidgets as widgets
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import torch
 from IPython.display import clear_output, display
 from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -25,7 +27,7 @@ def fit_and_plot_mst_3d(
     X,
     labels,
     n_msts=8,
-    n_epochs=500,
+    n_epochs=1000,
     batch_size=4096,
     learning_rate=0.05,
     negative_ratio=4,
@@ -197,7 +199,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=500, min=100, max=1000, step=100,
+        value=1000, min=100, max=1000, step=100,
         description="Epochs", continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -238,9 +240,16 @@ def display_interactive_mst_3d(
         description="Trustworthiness k", continuous_update=False,
         style={"description_width": "initial"},
     )
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps_available = bool(
+        sys.platform == "darwin"
+        and mps_backend is not None
+        and mps_backend.is_available()
+    )
+    device_default = "mps" if mps_available else "auto"
     device = widgets.Dropdown(
-        options=["auto", "cpu", "mps"],
-        value="auto",
+        options=["auto", "cpu"] + (["mps"] if mps_available else []),
+        value=device_default,
         description="Device",
         style={"description_width": "initial"},
     )
@@ -261,7 +270,7 @@ def display_interactive_mst_3d(
         sample_count.value = min(1000, max_instances)
         n_msts.value = 8
         rank_exponent.value = 1.0
-        n_epochs.value = 500
+        n_epochs.value = 1000
         batch_size.value = 4096
         learning_rate.value = 0.05
         negative_ratio.value = 4
@@ -269,7 +278,7 @@ def display_interactive_mst_3d(
         epsilon.value = 1e-4
         random_state_slider.value = 42
         trustworthiness_neighbors.value = 10
-        device.value = "auto"
+        device.value = device_default
 
     def fit_and_display(_=None):
         fit_button.disabled = True
