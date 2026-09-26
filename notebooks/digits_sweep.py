@@ -1,4 +1,4 @@
-"""Reusable helpers for the digits parameter-sweep notebook."""
+"""Reusable helpers for the MNIST parameter-sweep notebook."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed, parallel_config
-from sklearn.datasets import load_digits
+from sklearn.datasets import fetch_openml
 from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 
 # Support running from a source checkout without requiring an editable install.
 _project_root = Path(__file__).resolve().parents[1]
@@ -25,11 +25,40 @@ if str(_project_root) not in sys.path:
 from mst_embedding import IteratedMSTEmbedding
 
 
-def load_digits_data():
-    """Load digits and return standardized features and labels."""
-    digits = load_digits()
-    X = StandardScaler().fit_transform(digits.data)
-    return X, digits.target
+def load_mnist_data(sample_size=2000, random_state=42):
+    """Load a stratified MNIST subsample with pixel values scaled to [0, 1].
+
+    OpenML caches the full 70,000-row ``mnist_784`` dataset locally after the
+    first download. ``sample_size=None`` returns all rows.
+    """
+    if sample_size is not None:
+        if isinstance(sample_size, (bool, np.bool_)) or not isinstance(
+            sample_size, (int, np.integer)
+        ) or sample_size < 10:
+            raise ValueError("sample_size must be at least 10, or None for all MNIST rows.")
+
+    mnist = fetch_openml(
+        "mnist_784", version=1, as_frame=False, parser="auto", cache=True
+    )
+    X = np.asarray(mnist.data, dtype=np.float32)
+    labels = np.asarray(mnist.target, dtype=np.int64)
+
+    if sample_size is not None:
+        if sample_size > len(X):
+            raise ValueError(
+                f"sample_size={sample_size} exceeds the {len(X)} available MNIST rows."
+            )
+        if sample_size < len(X):
+            selected, _ = train_test_split(
+                np.arange(len(X)),
+                train_size=sample_size,
+                random_state=random_state,
+                stratify=labels,
+            )
+            X = X[selected]
+            labels = labels[selected]
+
+    return X / 255.0, labels
 
 
 def format_duration(seconds: float) -> str:
