@@ -90,6 +90,7 @@ def test_mps_device_runs_when_available():
         ("learning_rate", 0),
         ("lambda_rep", -1),
         ("epsilon", 0),
+        ("attraction_normalization", "invalid"),
     ],
 )
 def test_invalid_parameters_raise_value_error(parameter, value):
@@ -209,3 +210,28 @@ def test_hierarchical_zero_distance_and_singletons_are_supported():
     assert len({tuple(edge) for edge in estimator.graph_edges_}) == len(estimator.graph_edges_)
     assert (0, 1) in {tuple(sorted(map(int, edge))) for edge in estimator.graph_edges_}
     assert len(estimator.cluster_sample_indices_) == 3
+
+
+def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale():
+    X = small_data()
+    observed_weights = []
+
+    def capture_attraction_weights(positive_squared_distances, edge_weights):
+        observed_weights.extend(edge_weights.detach().cpu().numpy())
+        return torch.mean(edge_weights * torch.log1p(positive_squared_distances))
+
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        n_msts=2,
+        n_epochs=1,
+        batch_size=100,
+        negative_ratio=0,
+        random_state=3,
+        attraction_normalization="weight_sum",
+        attraction_loss_fn=capture_attraction_weights,
+    ).fit(X)
+
+    expected = estimator.graph_weights_ * (
+        len(estimator.graph_weights_) / estimator.graph_weights_.sum()
+    )
+    np.testing.assert_allclose(np.sort(observed_weights), np.sort(expected))
+    assert np.isclose(np.sum(observed_weights), len(estimator.graph_weights_))

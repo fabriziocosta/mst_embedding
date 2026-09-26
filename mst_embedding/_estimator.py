@@ -205,6 +205,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         first appearing in rank ``r`` receives weight ``r**(-rank_weight_exponent)``.
         Set to 0 for equal weights across ranks; the default of 1 gives the
         original inverse-rank weighting.
+    attraction_normalization : {'mean', 'weight_sum'}, default='mean'
+        Normalize the weighted attraction by the number of graph edges
+        ('mean', the original behavior) or by the sum of graph edge weights.
     graph_mode : {'exact', 'hierarchical'}, default='exact'
         Select the exact graph or a MiniBatchKMeans-based hierarchical approximation.
     n_clusters : int, default=100
@@ -261,6 +264,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         epsilon: float = 1e-4,
         device: str = "auto",
         rank_weight_exponent: float = 1.0,
+        attraction_normalization: str = "mean",
         attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
         | None = None,
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
@@ -273,6 +277,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     ) -> None:
         self.n_msts = n_msts
         self.rank_weight_exponent = rank_weight_exponent
+        self.attraction_normalization = attraction_normalization
         self.n_components = n_components
         self.n_epochs = n_epochs
         self.batch_size = batch_size
@@ -298,6 +303,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         rank_weight_exponent = _finite_nonnegative(
             "rank_weight_exponent", self.rank_weight_exponent
         )
+        if self.attraction_normalization not in {"mean", "weight_sum"}:
+            raise ValueError(
+                "attraction_normalization must be 'mean' or 'weight_sum'."
+            )
         n_components = _positive_integer("n_components", self.n_components)
         n_epochs = _positive_integer("n_epochs", self.n_epochs, allow_zero=True)
         batch_size = _positive_integer("batch_size", self.batch_size)
@@ -400,6 +409,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         edge_weights_t = torch.as_tensor(
             edge_weights, dtype=compute_dtype, device=compute_device
         )
+        attraction_scale = 1.0
+        if self.attraction_normalization == "weight_sum" and edge_weights.size:
+            # Minibatches are sampled uniformly by edge. Multiplying their
+            # mean by |E| / sum(w) gives an unbiased gradient estimate of the
+            # graph-wide weight-normalized attraction objective.
+            attraction_scale = len(edge_weights) / float(np.sum(edge_weights))
         edge_sources = edge_array[:, 0]
         edge_targets = edge_array[:, 1]
         adjacency = np.zeros((n_samples, n_samples), dtype=bool)
@@ -430,7 +445,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 src_t = torch.as_tensor(src, dtype=torch.long, device=compute_device)
                 dst_t = torch.as_tensor(dst, dtype=torch.long, device=compute_device)
                 batch_t = torch.as_tensor(batch, dtype=torch.long, device=compute_device)
-                weights_t = edge_weights_t[batch_t]
+                weights_t = edge_weights_t[batch_t] * attraction_scale
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
                 positive_d2 = torch.sum(positive_delta * positive_delta, dim=1)

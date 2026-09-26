@@ -93,6 +93,7 @@ the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
 The main parameters are `n_msts=8`, `rank_weight_exponent=1.0`,
+`attraction_normalization="mean"`,
 `n_components=2`, `n_epochs=1000`, `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
@@ -104,6 +105,12 @@ backend for datasets with at least 2,048 samples; smaller workloads use the CPU
 because GPU launch overhead was higher for a smaller handwritten-digits dataset.
 Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
 selected backend is available as `estimator.device_` after fitting.
+
+`attraction_normalization="mean"` preserves the original attraction loss
+normalization by edge count. Set it to `"weight_sum"` to normalize by the sum
+of edge weights, which reduces the attraction-scale change as more low-weight
+MST ranks are added. This option is a comparison variant; it does not change
+the default objective.
 
 ## Hierarchical graph construction
 

@@ -116,7 +116,7 @@ $$
 d_{ij}^2=\lVert y_i-y_j\rVert_2^2.
 $$
 
-The attractive term is
+With the default `attraction_normalization="mean"`, the attractive term is
 
 $$
 L_{\mathrm{attr}}=
@@ -127,6 +127,14 @@ $$
 Minimizing this term brings graph-connected samples together. The logarithm
 keeps the attraction increasing while reducing its growth for already distant
 pairs.
+
+The optional `attraction_normalization="weight_sum"` variant uses
+`sum(w_ij * log(1 + d_ij^2)) / sum(w_ij)` instead. This keeps the attraction
+scale from falling simply because more, lower-weight MST ranks were added.
+The default remains the original edge-count mean so the variant can be
+compared without changing baseline behavior. With minibatch optimization, the
+implementation scales each minibatch's weighted mean by the graph-wide ratio
+`|E| / sum(w)` to estimate this normalized objective.
 
 ### 4.2 Repulsion on sampled non-edges
 
@@ -160,15 +168,18 @@ $$
 L=L_{\mathrm{attr}}+\lambda_{\mathrm{rep}}L_{\mathrm{rep}},
 $$
 
-The parameter lambda_rep sets the relative strength of repulsion. The
-implementation uses the mean of weighted positive-edge losses and the mean of
-sampled negative losses; it does not normalize the positive term by the sum of
-edge weights.
+The parameter lambda_rep sets the relative strength of repulsion. With the
+default `attraction_normalization="mean"`, the implementation uses the mean
+of weighted positive-edge losses and the mean of sampled negative losses.
+Under `"weight_sum"`, it rescales positive edge weights to estimate the
+objective normalized by their graph-wide sum; the negative term remains
+unchanged.
 
 Both loss functions are modular. The estimator accepts an optional
 `attraction_loss_fn` callable that receives positive squared distances and edge
-weights, and an optional `repulsion_loss_fn` callable that receives negative
-squared distances and epsilon. Each callable must return a scalar
+weights (scaled according to `attraction_normalization`), and an optional
+`repulsion_loss_fn` callable that receives negative squared distances and
+epsilon. Each callable must return a scalar
 differentiable PyTorch tensor. If either hook is omitted, its built-in default
 is used. The estimator optimizes the sample coordinates; custom loss functions
 are not themselves trained.
@@ -187,6 +198,7 @@ The default estimator settings are:
 | --- | ---: | --- |
 | `n_msts` | 8 | Number of edge-disjoint MSTs |
 | `rank_weight_exponent` | 1.0 | Decay of edge weights by tree rank |
+| `attraction_normalization` | `mean` | Attraction denominator: edge count or total edge weight |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |

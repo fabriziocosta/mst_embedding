@@ -128,7 +128,7 @@ $$
 d_{ij}^2=\|y_i-y_j\|^2.
 $$
 
-The attractive loss is
+The default attractive loss is
 
 $$
 L_{\text{attr}}
@@ -147,6 +147,20 @@ attraction = (w * torch.log1p(d2_pos)).mean()
 ```
 
 Do not use a UMAP cross-entropy objective. This simple attraction function is the baseline algorithm.
+
+An optional `attraction_normalization="weight_sum"` variant divides by the
+total edge weight instead:
+
+$$
+L_{\text{attr}}^{\text{weight-sum}}=
+\frac{\sum_{(i,j)\in E}w_{ij}\log(1+d_{ij}^2)}
+{\sum_{(i,j)\in E}w_{ij}}.
+$$
+
+The default `attraction_normalization="mean"` preserves the original
+edge-count denominator. Weight-sum normalization reduces the change in
+attraction scale as additional, lower-weight MST ranks are included, making it
+available for controlled comparisons without changing the baseline.
 
 ## 4. Random non-neighbor repulsion
 
