@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import pickle
+import tarfile
 import time
+from pathlib import Path
+from urllib.request import urlretrieve
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 from IPython.display import display
-from sklearn.datasets import fetch_openml, fetch_olivetti_faces, load_digits
+from sklearn.datasets import fetch_openml, get_data_home
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -26,7 +31,7 @@ def _stratified_standardized_sample(
     max_samples: int,
     random_state: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    X = np.asarray(X, dtype=np.float64)
+    X = np.asarray(X)
     labels = np.asarray(labels)
     if len(X) > max_samples:
         indices, _ = train_test_split(
@@ -37,7 +42,7 @@ def _stratified_standardized_sample(
         )
         X = X[indices]
         labels = labels[indices]
-    return StandardScaler().fit_transform(X), labels
+    return StandardScaler().fit_transform(np.asarray(X, dtype=np.float64)), labels
 
 
 def _load_openml(name: str) -> tuple[np.ndarray, np.ndarray]:
@@ -48,16 +53,85 @@ def _load_openml(name: str) -> tuple[np.ndarray, np.ndarray]:
         parser="auto",
         cache=True,
     )
-    return np.asarray(dataset.data), np.asarray(dataset.target, dtype=np.int64)
+    labels = np.unique(dataset.target, return_inverse=True)[1]
+    return np.asarray(dataset.data), labels
+
+
+def _load_kmnist() -> tuple[np.ndarray, np.ndarray]:
+    """Load Kuzushiji-MNIST from its official NumPy archives and cache locally."""
+    base_url = "https://codh.rois.ac.jp/kmnist/dataset/kmnist"
+    cache_dir = Path(get_data_home()) / "kmnist"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def load_archive(filename: str) -> np.ndarray:
+        path = cache_dir / filename
+        if not path.exists():
+            temporary_path = path.with_suffix(path.suffix + ".tmp")
+            try:
+                urlretrieve(f"{base_url}/{filename}", temporary_path)
+                temporary_path.replace(path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+        with np.load(path) as archive:
+            return np.asarray(archive["arr_0"])
+
+    images = np.concatenate(
+        [load_archive("kmnist-train-imgs.npz"), load_archive("kmnist-test-imgs.npz")]
+    )
+    labels = np.concatenate(
+        [load_archive("kmnist-train-labels.npz"), load_archive("kmnist-test-labels.npz")]
+    )
+    return images.reshape(len(images), -1), labels
+
+
+def _load_cifar10() -> tuple[np.ndarray, np.ndarray]:
+    """Load CIFAR-10's official Python archive and cache the verified download."""
+    archive_url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
+    expected_md5 = "c58f30108f718f92721af3b95e74349a"
+    archive_path = Path(get_data_home()) / "cifar-10-python.tar.gz"
+
+    def has_expected_checksum(path: Path) -> bool:
+        digest = hashlib.md5(usedforsecurity=False)
+        with path.open("rb") as archive_file:
+            for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == expected_md5
+
+    if not archive_path.exists() or not has_expected_checksum(archive_path):
+        temporary_path = archive_path.with_suffix(archive_path.suffix + ".tmp")
+        try:
+            urlretrieve(archive_url, temporary_path)
+            if not has_expected_checksum(temporary_path):
+                raise ValueError("Downloaded CIFAR-10 archive failed its MD5 checksum.")
+            temporary_path.replace(archive_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    images = []
+    labels = []
+    batch_names = [
+        *(f"cifar-10-batches-py/data_batch_{index}" for index in range(1, 6)),
+        "cifar-10-batches-py/test_batch",
+    ]
+    with tarfile.open(archive_path, mode="r:gz") as archive:
+        for batch_name in batch_names:
+            batch_file = archive.extractfile(batch_name)
+            if batch_file is None:
+                raise ValueError(f"CIFAR-10 archive is missing {batch_name}.")
+            with batch_file:
+                batch = pickle.load(batch_file, encoding="bytes")
+            images.append(batch[b"data"])
+            labels.extend(batch[b"labels"])
+
+    return np.concatenate(images), np.asarray(labels, dtype=np.int64)
 
 
 def _load_datasets(max_samples: int, random_state: int):
-    digits = load_digits()
     loaders = {
-        "Digits (8×8)": lambda: (digits.data, digits.target),
         "MNIST (28×28)": lambda: _load_openml("mnist_784"),
         "Fashion-MNIST (28×28)": lambda: _load_openml("Fashion-MNIST"),
-        "Olivetti faces (64×64)": lambda: _load_olivetti(random_state),
+        "Kuzushiji-MNIST (28×28)": _load_kmnist,
+        "CIFAR-10 (32×32 RGB)": _load_cifar10,
     }
     datasets = {}
     errors = {}
@@ -83,11 +157,6 @@ def _load_datasets(max_samples: int, random_state: int):
     if not datasets:
         raise RuntimeError("No datasets loaded successfully.")
     return datasets, errors
-
-
-def _load_olivetti(random_state: int) -> tuple[np.ndarray, np.ndarray]:
-    bunch = fetch_olivetti_faces(shuffle=True, random_state=random_state)
-    return bunch.data, bunch.target
 
 
 def _default_device() -> str:
@@ -134,6 +203,7 @@ def run_high_dim_mst_gallery(
         started = time.perf_counter()
         embedding = estimator.fit_transform(X)
         elapsed = time.perf_counter() - started
+        print(f"  fit completed in {elapsed:.2f} seconds", flush=True)
         embeddings[name] = embedding
         summaries.append(
             {
@@ -160,7 +230,7 @@ def run_high_dim_mst_gallery(
         )
         ax.set_title(
             f"{name} — {len(X):,} samples × {X.shape[1]:,} features; "
-            f"{n_msts} MSTs; {n_epochs} epochs"
+            f"{n_msts} MSTs; {n_epochs} epochs; {elapsed:.2f} s"
         )
         ax.set_xlabel("Embedding dimension 1")
         ax.set_ylabel("Embedding dimension 2")
