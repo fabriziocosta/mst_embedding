@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import numbers
 import sys
+from collections.abc import Callable
 
 import numpy as np
 import torch
 from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
+
+from .losses import inverse_distance_repulsion_loss, log_attraction_loss
 
 
 def _positive_integer(name: str, value: object, *, allow_zero: bool = False) -> int:
@@ -51,6 +54,15 @@ def _resolve_device(requested: str, n_samples: int) -> torch.device:
     if requested == "auto" and mps_available and n_samples >= 2048:
         return torch.device("mps")
     return torch.device("cpu")
+
+
+def _validate_loss_output(name: str, value: object) -> torch.Tensor:
+    if not isinstance(value, torch.Tensor) or value.ndim != 0 or not value.requires_grad:
+        raise ValueError(
+            f"{name} must return a scalar torch.Tensor that is differentiable "
+            "with respect to the supplied distances."
+        )
+    return value
 
 
 def _iterated_mst_edges(
@@ -138,6 +150,14 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         Metal Performance Shaders (MPS) backend on macOS for datasets with at
         least 2048 samples; smaller datasets use the CPU to avoid GPU launch
         overhead. Explicitly select ``mps`` or ``cpu`` to override this choice.
+    attraction_loss_fn : callable or None, default=None
+        Optional callable with signature ``fn(positive_squared_distances,
+        edge_weights)`` that returns a scalar differentiable PyTorch tensor.
+        The default is :func:`mst_embedding.log_attraction_loss`.
+    repulsion_loss_fn : callable or None, default=None
+        Optional callable with signature ``fn(negative_squared_distances,
+        epsilon)`` that returns a scalar differentiable PyTorch tensor. The
+        default is :func:`mst_embedding.inverse_distance_repulsion_loss`.
     """
 
     def __init__(
@@ -153,6 +173,9 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         epsilon: float = 1e-4,
         device: str = "auto",
         rank_weight_exponent: float = 1.0,
+        attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+        | None = None,
+        repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
     ) -> None:
         self.n_msts = n_msts
         self.rank_weight_exponent = rank_weight_exponent
@@ -165,6 +188,8 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         self.random_state = random_state
         self.epsilon = epsilon
         self.device = device
+        self.attraction_loss_fn = attraction_loss_fn
+        self.repulsion_loss_fn = repulsion_loss_fn
 
     def fit(self, X: object, y: object = None) -> "IteratedMSTEmbedding":
         """Fit the embedding and store coordinates for the input rows."""
@@ -184,6 +209,20 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         )
         lambda_rep = _finite_nonnegative("lambda_rep", self.lambda_rep)
         epsilon = _finite_nonnegative("epsilon", self.epsilon, strictly_positive=True)
+        if self.attraction_loss_fn is not None and not callable(self.attraction_loss_fn):
+            raise ValueError("attraction_loss_fn must be callable or None.")
+        if self.repulsion_loss_fn is not None and not callable(self.repulsion_loss_fn):
+            raise ValueError("repulsion_loss_fn must be callable or None.")
+        attraction_loss_fn = (
+            log_attraction_loss
+            if self.attraction_loss_fn is None
+            else self.attraction_loss_fn
+        )
+        repulsion_loss_fn = (
+            inverse_distance_repulsion_loss
+            if self.repulsion_loss_fn is None
+            else self.repulsion_loss_fn
+        )
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
         n_samples = X_checked.shape[0]
         if n_samples < 2:
@@ -247,7 +286,10 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
                 positive_d2 = torch.sum(positive_delta * positive_delta, dim=1)
-                attraction = torch.mean(weights_t * torch.log1p(positive_d2))
+                attraction = _validate_loss_output(
+                    "attraction_loss_fn",
+                    attraction_loss_fn(positive_d2, weights_t),
+                )
 
                 eligible_sources = src[negative_counts[src] > 0]
                 if negative_ratio and eligible_sources.size:
@@ -268,7 +310,10 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
                     )
                     negative_delta = coordinates[ni] - coordinates[nj]
                     negative_d2 = torch.sum(negative_delta * negative_delta, dim=1)
-                    repulsion = torch.mean(1.0 / (1.0 + negative_d2 + epsilon))
+                    repulsion = _validate_loss_output(
+                        "repulsion_loss_fn",
+                        repulsion_loss_fn(negative_d2, epsilon),
+                    )
                 else:
                     # Some small or dense graphs have no eligible negatives.
                     repulsion = coordinates.sum() * 0.0

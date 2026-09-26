@@ -4,6 +4,7 @@
 embedding from a union of edge-disjoint minimum spanning trees. It defaults to
 two dimensions and supports other output dimensions through `n_components`.
 It follows the algorithm described in [IDEA.md](IDEA.md).
+For a detailed explanation of the approach, see the [whitepaper](WHITEPAPER.md).
 
 ## Install
 
@@ -72,3 +73,24 @@ backend for datasets with at least 2,048 samples; smaller workloads use the CPU
 because GPU launch overhead was higher for a smaller handwritten-digits dataset.
 Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
 selected backend is available as `estimator.device_` after fitting.
+
+The attraction and repulsion losses can be replaced independently with
+`attraction_loss_fn` and `repulsion_loss_fn`. Each callable must return a scalar
+PyTorch tensor that remains differentiable with respect to its distance input.
+For example, to use a quadratic attraction while keeping the default
+repulsion:
+
+```python
+import torch
+from mst_embedding import IteratedMSTEmbedding
+
+def quadratic_attraction(positive_squared_distances, edge_weights):
+    return torch.mean(edge_weights * positive_squared_distances)
+
+embedding = IteratedMSTEmbedding(
+    attraction_loss_fn=quadratic_attraction,
+).fit_transform(X)
+```
+
+The built-in `log_attraction_loss` and `inverse_distance_repulsion_loss`
+functions are exported from `mst_embedding` for reuse or comparison.
