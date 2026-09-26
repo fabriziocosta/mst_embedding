@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
 import time
@@ -12,7 +13,7 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed, parallel_config
 from sklearn.datasets import fetch_openml
-from sklearn.manifold import trustworthiness
+from sklearn.manifold import TSNE, trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split
@@ -244,6 +245,94 @@ def run_umap_comparisons(
         ax.set_title(
             f"{result['configuration']}\n"
             f"n_neighbors={result['n_neighbors']}, min_dist={result['min_dist']}\n"
+            f"trustworthiness={result['trustworthiness']:.3f}; "
+            f"5-NN CV={result['5-NN 5-fold CV accuracy']:.3f}\n"
+            f"runtime={result['elapsed']}"
+        )
+        ax.set_xlabel("Embedding dimension 1")
+        ax.set_ylabel("Embedding dimension 2")
+
+    for ax in axes.flat[len(results):]:
+        ax.set_visible(False)
+    colorbar = fig.colorbar(points, ax=list(axes.flat[:len(results)]), ticks=range(10))
+    colorbar.set_label("Digit label")
+    plt.show()
+
+    summary = pd.DataFrame(
+        [{key: value for key, value in result.items() if key != "embedding"}
+         for result in results]
+    )
+    return results, summary
+
+
+def run_tsne_comparisons(
+    X,
+    labels,
+    configurations,
+    n_iterations=1000,
+    random_state=42,
+    trustworthiness_neighbors=10,
+):
+    """Fit and plot several t-SNE perplexities with shared evaluation scores."""
+    if not configurations:
+        raise ValueError("configurations must contain at least one setting")
+
+    iteration_parameter = (
+        "max_iter" if "max_iter" in inspect.signature(TSNE).parameters else "n_iter"
+    )
+    results = []
+    for configuration in configurations:
+        name = configuration.get("name", "t-SNE")
+        perplexity = configuration["perplexity"]
+        reducer = TSNE(
+            n_components=2,
+            perplexity=perplexity,
+            init="pca",
+            learning_rate="auto",
+            random_state=random_state,
+            n_jobs=-1,
+            **{iteration_parameter: n_iterations},
+        )
+        print(f"Fitting t-SNE: {name} ...", flush=True)
+        started = time.perf_counter()
+        embedding = reducer.fit_transform(X)
+        elapsed = time.perf_counter() - started
+
+        score = trustworthiness(
+            X, embedding, n_neighbors=min(trustworthiness_neighbors, len(X) - 1)
+        )
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+        knn_accuracy = cross_val_score(
+            KNeighborsClassifier(n_neighbors=5), embedding, labels, cv=cv
+        ).mean()
+        results.append({
+            "configuration": name,
+            "perplexity": perplexity,
+            "iterations": n_iterations,
+            "trustworthiness": score,
+            "5-NN 5-fold CV accuracy": knn_accuracy,
+            "seconds": elapsed,
+            "elapsed": format_duration(elapsed),
+            "embedding": embedding,
+        })
+        print(f"Finished t-SNE: {name} in {format_duration(elapsed)}", flush=True)
+
+    ncols = min(3, len(results))
+    nrows = math.ceil(len(results) / ncols)
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(5 * ncols, 4 * nrows), squeeze=False,
+        constrained_layout=True,
+    )
+    for index, result in enumerate(results):
+        embedding = result["embedding"]
+        ax = axes.flat[index]
+        points = ax.scatter(
+            embedding[:, 0], embedding[:, 1], c=labels, cmap="tab10",
+            vmin=-0.5, vmax=9.5, s=7, alpha=0.8, linewidths=0,
+        )
+        ax.set_title(
+            f"{result['configuration']}\n"
+            f"perplexity={result['perplexity']}\n"
             f"trustworthiness={result['trustworthiness']:.3f}; "
             f"5-NN CV={result['5-NN 5-fold CV accuracy']:.3f}\n"
             f"runtime={result['elapsed']}"
