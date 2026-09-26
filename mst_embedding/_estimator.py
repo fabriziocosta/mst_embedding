@@ -166,7 +166,11 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         adjacency = np.zeros((n_samples, n_samples), dtype=bool)
         adjacency[edge_sources, edge_targets] = True
         adjacency[edge_targets, edge_sources] = True
-        valid_negative_nodes = [np.flatnonzero(~adjacency[i] & (np.arange(n_samples) != i)) for i in range(n_samples)]
+        sample_ids = np.arange(n_samples)
+        valid_negative_nodes = [
+            np.flatnonzero(~adjacency[i] & (sample_ids != i))
+            for i in range(n_samples)
+        ]
 
         for _ in range(n_epochs):
             order = rng.permutation(len(edge_array))
