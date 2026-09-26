@@ -130,9 +130,11 @@ pairs.
 
 ### 4.2 Repulsion on sampled non-edges
 
-For each positive-edge source in a minibatch, the implementation samples
-negative targets uniformly from nodes that are neither the source nor one of
-its graph neighbors. The squared embedding distance for a sampled pair is:
+For each undirected positive edge in a minibatch, the implementation samples
+negative targets for both endpoints. This makes sampling independent of the
+arbitrary orientation used to store an edge. Targets are sampled uniformly
+from nodes that are neither the source nor one of its graph neighbors. The
+squared embedding distance for a sampled pair is:
 
 $$
 d_{uv}^2=\lVert y_u-y_v\rVert_2^2.
@@ -189,7 +191,7 @@ The default estimator settings are:
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |
 | `learning_rate` | 0.05 | Adam learning rate |
-| `negative_ratio` | 4 | Negative samples per positive edge source |
+| `negative_ratio` | 4 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 1.0 | Repulsion coefficient |
 | `epsilon` | `1e-4` | Repulsion stabilizer |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |

@@ -182,6 +182,12 @@ def run_high_dim_mst_gallery(
     n_msts: int = 8,
     n_epochs: int = 1000,
     batch_size: int = 4096,
+    graph_mode: str = "exact",
+    n_clusters: int = 100,
+    n_coarse_msts: int = 4,
+    n_local_msts: int = 8,
+    n_jobs: int = -1,
+    minibatch_size: int = 1024,
     random_state: int = 42,
     device: str | None = None,
 ) -> dict[str, object]:
@@ -229,6 +235,12 @@ def run_high_dim_mst_gallery(
                         rank_weight_exponent=1.0,
                         random_state=random_state,
                         device=resolved_device,
+                        graph_mode=graph_mode,
+                        n_clusters=n_clusters,
+                        n_coarse_msts=n_coarse_msts,
+                        n_local_msts=n_local_msts,
+                        n_jobs=n_jobs,
+                        minibatch_size=minibatch_size,
                     ),
                 ),
             ]
@@ -271,6 +283,11 @@ def run_high_dim_mst_gallery(
                 "features_per_patch": projection.n_features_per_patch_,
                 "classes": len(np.unique(labels)),
                 "n_msts": n_msts,
+                "graph_mode": graph_mode,
+                "n_clusters": n_clusters if graph_mode == "hierarchical" else None,
+                "n_coarse_msts": n_coarse_msts if graph_mode == "hierarchical" else None,
+                "n_local_msts": n_local_msts if graph_mode == "hierarchical" else None,
+                "minibatch_size": minibatch_size if graph_mode == "hierarchical" else None,
                 "n_epochs": n_epochs,
                 "seconds": elapsed,
                 "device": estimator.device_,
@@ -290,7 +307,7 @@ def run_high_dim_mst_gallery(
         ax.set_title(
             f"{name} — {len(X):,} samples × "
             f"{projection.n_features_out_:,} projected features; "
-            f"{n_msts} MSTs; {n_epochs} epochs; {elapsed:.2f} s"
+            f"{graph_mode} graph; {n_msts} MSTs; {n_epochs} epochs; {elapsed:.2f} s"
         )
         ax.set_xlabel("Embedding dimension 1")
         ax.set_ylabel("Embedding dimension 2")

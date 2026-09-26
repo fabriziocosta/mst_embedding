@@ -226,7 +226,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     learning_rate : float, default=0.05
         Adam learning rate.
     negative_ratio : int, default=4
-        Number of sampled non-neighbors per positive edge.
+        Number of sampled non-neighbors per endpoint of each positive edge.
     lambda_rep : float, default=1.0
         Coefficient multiplying the repulsive loss.
     random_state : int or None, default=42
@@ -439,7 +439,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                     attraction_loss_fn(positive_d2, weights_t),
                 )
 
-                eligible_sources = src[negative_counts[src] > 0]
+                # Positive edges are undirected, so both endpoints contribute
+                # negative anchors regardless of Prim's stored orientation.
+                edge_endpoints = np.concatenate((src, dst))
+                eligible_sources = edge_endpoints[
+                    negative_counts[edge_endpoints] > 0
+                ]
                 if negative_ratio and eligible_sources.size:
                     eligible_counts = negative_counts[eligible_sources]
                     sampled_offsets = (

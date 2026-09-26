@@ -150,7 +150,9 @@ Do not use a UMAP cross-entropy objective. This simple attraction function is th
 
 ## 4. Random non-neighbor repulsion
 
-For each positive edge in a minibatch, randomly sample several negative pairs.
+For each positive undirected edge in a minibatch, randomly sample several
+negative pairs from both endpoints. The stored edge orientation does not
+determine which endpoint acts as an anchor.
 
 A useful initial value is:
 
@@ -158,7 +160,8 @@ A useful initial value is:
 negative_ratio = 4
 ```
 
-For each positive source node `i`, sample random nodes `j_neg` uniformly from the dataset.
+For each endpoint `i` of each positive edge, sample random nodes `j_neg`
+uniformly from the dataset.
 
 Reject a sampled pair if:
 - `i == j_neg`, or

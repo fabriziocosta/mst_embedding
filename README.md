@@ -97,7 +97,9 @@ The main parameters are `n_msts=8`, `rank_weight_exponent=1.0`,
 `negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
 `rank ** (-rank_weight_exponent)`: the default of 1.0 gives inverse-rank
-weighting, while 0 gives equal weights to all ranks. On macOS, `auto` uses PyTorch's MPS
+weighting, while 0 gives equal weights to all ranks. `negative_ratio` samples
+that many non-neighbors from each endpoint of each positive edge. On macOS,
+`auto` uses PyTorch's MPS
 backend for datasets with at least 2,048 samples; smaller workloads use the CPU
 because GPU launch overhead was higher for a smaller handwritten-digits dataset.
 Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
