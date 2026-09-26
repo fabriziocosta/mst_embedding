@@ -52,7 +52,11 @@ def _fit_and_score(X, labels, parameter, value, base_params, n_neighbors):
     print(f"Fitting {parameter}={value} ...", flush=True)
     embedding = estimator.fit_transform(X)
     elapsed = time.perf_counter() - started
-    print(f"Finished {parameter}={value} in {format_duration(elapsed)}", flush=True)
+    print(
+        f"Finished {parameter}={value} in {format_duration(elapsed)} "
+        f"on {estimator.device_}",
+        flush=True,
+    )
 
     score = trustworthiness(
         X, embedding, n_neighbors=min(n_neighbors, len(X) - 1)
@@ -67,6 +71,7 @@ def _fit_and_score(X, labels, parameter, value, base_params, n_neighbors):
         "5-NN 5-fold CV accuracy": knn_accuracy,
         "seconds": elapsed,
         "elapsed": format_duration(elapsed),
+        "device": estimator.device_,
         "embedding": embedding,
     }
 

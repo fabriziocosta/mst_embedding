@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numbers
+import sys
 
 import numpy as np
 import torch
@@ -30,6 +31,26 @@ def _finite_nonnegative(name: str, value: object, *, strictly_positive: bool = F
         qualifier = "positive" if strictly_positive else "non-negative"
         raise ValueError(f"{name} must be a finite {qualifier} number.")
     return result
+
+
+def _resolve_device(requested: str, n_samples: int) -> torch.device:
+    if requested not in {"auto", "cpu", "mps"}:
+        raise ValueError("device must be one of 'auto', 'cpu', or 'mps'.")
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps_available = bool(
+        sys.platform == "darwin"
+        and mps_backend is not None
+        and mps_backend.is_available()
+    )
+    if requested == "mps":
+        if not mps_available:
+            raise ValueError("device='mps' requires macOS and a PyTorch build with MPS support.")
+        return torch.device("mps")
+    # MPS launch overhead dominated for the small digits dataset in local
+    # benchmarks; larger embeddings benefit from its parallel tensor kernels.
+    if requested == "auto" and mps_available and n_samples >= 2048:
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def _iterated_mst_edges(distances: np.ndarray, n_msts: int) -> tuple[np.ndarray, np.ndarray]:
@@ -103,6 +124,11 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         Seed controlling initialization, edge shuffling, and negative sampling.
     epsilon : float, default=1e-4
         Stabilizing constant in the repulsive loss.
+    device : {'auto', 'cpu', 'mps'}, default='auto'
+        Compute device for embedding optimization. ``auto`` selects Apple's
+        Metal Performance Shaders (MPS) backend on macOS for datasets with at
+        least 2048 samples; smaller datasets use the CPU to avoid GPU launch
+        overhead. Explicitly select ``mps`` or ``cpu`` to override this choice.
     """
 
     def __init__(
@@ -115,6 +141,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         lambda_rep: float = 1.0,
         random_state: int | None = 42,
         epsilon: float = 1e-4,
+        device: str = "auto",
     ) -> None:
         self.n_msts = n_msts
         self.n_epochs = n_epochs
@@ -124,6 +151,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         self.lambda_rep = lambda_rep
         self.random_state = random_state
         self.epsilon = epsilon
+        self.device = device
 
     def fit(self, X: object, y: object = None) -> "IteratedMSTEmbedding":
         """Fit the embedding and store coordinates for the input rows."""
@@ -139,11 +167,12 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         )
         lambda_rep = _finite_nonnegative("lambda_rep", self.lambda_rep)
         epsilon = _finite_nonnegative("epsilon", self.epsilon, strictly_positive=True)
-
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
         n_samples = X_checked.shape[0]
         if n_samples < 2:
             raise ValueError("X must contain at least two samples to construct an MST.")
+        compute_device = _resolve_device(self.device, n_samples)
+        compute_dtype = torch.float32 if compute_device.type == "mps" else torch.float64
 
         distances = cdist(X_checked, X_checked, metric="euclidean")
         if not np.isfinite(distances).all():
@@ -155,12 +184,16 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
         torch_generator = torch.Generator(device="cpu")
         seed = int(rng.randint(0, np.iinfo(np.int32).max))
         torch_generator.manual_seed(seed)
-        initial = torch.randn((n_samples, 2), generator=torch_generator, dtype=torch.float64)
+        initial = torch.randn(
+            (n_samples, 2), generator=torch_generator, dtype=compute_dtype
+        ).to(compute_device)
         coordinates = torch.nn.Parameter(initial * 1e-3)
         optimizer = torch.optim.Adam([coordinates], lr=learning_rate)
 
         edge_array = edges
-        edge_weights_t = torch.as_tensor(edge_weights, dtype=torch.float64)
+        edge_weights_t = torch.as_tensor(
+            edge_weights, dtype=compute_dtype, device=compute_device
+        )
         edge_sources = edge_array[:, 0]
         edge_targets = edge_array[:, 1]
         adjacency = np.zeros((n_samples, n_samples), dtype=bool)
@@ -188,9 +221,10 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
                 batch = order[start : start + batch_size]
                 src = edge_sources[batch]
                 dst = edge_targets[batch]
-                src_t = torch.as_tensor(src, dtype=torch.long)
-                dst_t = torch.as_tensor(dst, dtype=torch.long)
-                weights_t = edge_weights_t[batch]
+                src_t = torch.as_tensor(src, dtype=torch.long, device=compute_device)
+                dst_t = torch.as_tensor(dst, dtype=torch.long, device=compute_device)
+                batch_t = torch.as_tensor(batch, dtype=torch.long, device=compute_device)
+                weights_t = edge_weights_t[batch_t]
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
                 positive_d2 = torch.sum(positive_delta * positive_delta, dim=1)
@@ -207,8 +241,12 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
                         eligible_sources[:, None], sampled_offsets
                     ].reshape(-1)
                     negative_sources = np.repeat(eligible_sources, negative_ratio)
-                    ni = torch.as_tensor(negative_sources, dtype=torch.long)
-                    nj = torch.as_tensor(negative_targets, dtype=torch.long)
+                    ni = torch.as_tensor(
+                        negative_sources, dtype=torch.long, device=compute_device
+                    )
+                    nj = torch.as_tensor(
+                        negative_targets, dtype=torch.long, device=compute_device
+                    )
                     negative_delta = coordinates[ni] - coordinates[nj]
                     negative_d2 = torch.sum(negative_delta * negative_delta, dim=1)
                     repulsion = torch.mean(1.0 / (1.0 + negative_d2 + epsilon))
@@ -224,6 +262,7 @@ class IteratedMSTEmbedding(TransformerMixin, BaseEstimator):
                     coordinates -= coordinates.mean(dim=0, keepdim=True)
 
         self.n_features_in_ = X_checked.shape[1]
+        self.device_ = str(compute_device)
         if hasattr(X, "columns") and all(isinstance(c, str) for c in X.columns):
             self.feature_names_in_ = np.asarray(X.columns, dtype=object)
         elif hasattr(self, "feature_names_in_"):

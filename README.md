@@ -31,5 +31,9 @@ the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
 The main parameters are `n_msts=4`, `n_epochs=500`, `batch_size=4096`,
-`learning_rate=0.05`, `negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`, and
-`random_state=42`.
+`learning_rate=0.05`, `negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`,
+`random_state=42`, and `device="auto"`. On macOS, `auto` uses PyTorch's MPS
+backend for datasets with at least 2,048 samples; smaller workloads use the CPU
+because GPU launch overhead was higher for the digits dataset. Set `device="mps"`
+to force Metal acceleration or `device="cpu"` to force CPU execution. The
+selected backend is available as `estimator.device_` after fitting.

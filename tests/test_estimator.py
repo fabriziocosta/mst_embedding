@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import torch
 from sklearn.base import clone
 
 from mst_embedding import IteratedMSTEmbedding
@@ -24,6 +25,7 @@ def test_sklearn_api_and_training_transform():
     assert np.isfinite(embedding).all()
     np.testing.assert_array_equal(estimator.transform(X), embedding)
     assert estimator.n_features_in_ == X.shape[1]
+    assert estimator.device_ == "cpu"
 
 
 def test_seed_reproduces_embedding():
@@ -60,6 +62,18 @@ def test_no_eligible_negative_pairs_is_supported():
     X = np.array([[0.0], [1.0]])
     estimator = IteratedMSTEmbedding(n_msts=1, n_epochs=2, random_state=3).fit(X)
     assert estimator.embedding_.shape == (2, 2)
+    assert np.isfinite(estimator.embedding_).all()
+
+
+@pytest.mark.skipif(
+    not (torch.backends.mps.is_built() and torch.backends.mps.is_available()),
+    reason="PyTorch MPS is unavailable",
+)
+def test_mps_device_runs_when_available():
+    estimator = IteratedMSTEmbedding(
+        n_msts=1, n_epochs=2, random_state=5, device="mps"
+    ).fit(small_data())
+    assert estimator.device_ == "mps"
     assert np.isfinite(estimator.embedding_).all()
 
 
