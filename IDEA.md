@@ -1,14 +1,17 @@
-Implement a simple 2D embedding algorithm based on repeated minimum spanning trees.
+Implement a simple embedding algorithm based on repeated minimum spanning trees.
+The original/default output is 2D; `n_components` generalizes the optimized
+coordinate matrix to other dimensions, including 3D for interactive plots.
 
 Input:
 - A data matrix `X` of shape `(n_samples, n_features)`.
 - Number of MST iterations `R`.
+- Number of embedding dimensions `n_components` (default: 2).
 - Number of embedding epochs.
 - Negative sampling ratio.
 - Repulsion coefficient `lambda_rep`.
 - Random seed.
 
-The algorithm has two stages: graph construction and 2D embedding.
+The algorithm has two stages: graph construction and coordinate optimization.
 
 ## 1. Construct the iterated-MST graph
 
@@ -63,12 +66,12 @@ After `R` iterations, the graph is the union of `R` edge-disjoint minimum spanni
 
 Do not add k-nearest-neighbor edges, closure edges, or any other graph construction.
 
-## 2. Initialize the 2D embedding
+## 2. Initialize the embedding
 
-Create one trainable 2D coordinate per input sample:
+Create one trainable coordinate vector per input sample:
 
 $$
-y_i\in\mathbb R^2.
+y_i\in\mathbb R^{n_{components}}.
 $$
 
 Initialize all coordinates with small random Gaussian noise, for example:
@@ -221,7 +224,7 @@ lambda_rep = 1.0
 Return the final matrix
 
 ```python
-Y.shape == (n_samples, 2)
+Y.shape == (n_samples, n_components)
 ```
 
 Optionally normalize each output dimension by its standard deviation for visualization:

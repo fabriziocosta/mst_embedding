@@ -1,130 +1,123 @@
-"""Interactive 3D MNIST embedding comparisons for the companion notebook."""
+"""Interactive 3D MST embedding visualization for the MNIST notebook."""
 
 from __future__ import annotations
 
-import inspect
 import time
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from sklearn.manifold import TSNE
+from sklearn.manifold import trustworthiness
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.neighbors import KNeighborsClassifier
 
-from digits_sweep import format_duration
+try:  # Notebook execution puts this directory directly on sys.path.
+    from digits_sweep import format_duration
+except ModuleNotFoundError:  # Also support importing as notebooks.digits_3d.
+    from .digits_sweep import format_duration
+from mst_embedding import IteratedMSTEmbedding
 
 
-def run_tsne_3d_comparisons(
+def fit_and_plot_mst_3d(
     X,
     labels,
-    configurations,
-    n_iterations=1000,
+    n_msts=8,
+    n_epochs=500,
+    batch_size=4096,
+    learning_rate=0.05,
+    negative_ratio=4,
+    lambda_rep=1.0,
+    epsilon=1e-4,
     random_state=42,
+    device="auto",
+    trustworthiness_neighbors=10,
 ):
-    """Fit 3D t-SNE embeddings and show them in one interactive Plotly row.
-
-    Each subplot has an independent 3D camera, so drag to rotate, scroll to
-    zoom, and hover over points to see their digit labels.
-    """
+    """Fit one 3D MST embedding and return its scores and Plotly figure."""
     X = np.asarray(X)
     labels = np.asarray(labels)
     if X.ndim != 2 or len(X) != len(labels):
         raise ValueError("X must be 2D and have one label per row")
-    if len(X) < 6:
-        raise ValueError("At least 6 samples are required for 5-fold 3D t-SNE")
-    if not configurations:
-        raise ValueError("configurations must contain at least one setting")
+    if len(X) < 25:
+        raise ValueError("At least 25 samples are required for 5-fold 5-NN scoring")
 
-    iteration_parameter = (
-        "max_iter" if "max_iter" in inspect.signature(TSNE).parameters else "n_iter"
+    estimator = IteratedMSTEmbedding(
+        n_msts=n_msts,
+        n_components=3,
+        n_epochs=n_epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        negative_ratio=negative_ratio,
+        lambda_rep=lambda_rep,
+        epsilon=epsilon,
+        random_state=random_state,
+        device=device,
     )
-    results = []
-    for configuration in configurations:
-        name = configuration.get("name", "t-SNE")
-        perplexity = configuration["perplexity"]
-        if not 0 < perplexity < len(X):
-            raise ValueError(
-                f"perplexity must be positive and smaller than the sample count; got {perplexity}"
-            )
-        reducer = TSNE(
-            n_components=3,
-            perplexity=perplexity,
-            init="pca",
-            learning_rate="auto",
-            random_state=random_state,
-            n_jobs=-1,
-            **{iteration_parameter: n_iterations},
-        )
-        print(f"Fitting 3D t-SNE: {name} ...", flush=True)
-        started = time.perf_counter()
-        embedding = reducer.fit_transform(X)
-        elapsed = time.perf_counter() - started
-        results.append({
-            "configuration": name,
-            "perplexity": perplexity,
-            "embedding": embedding,
-            "seconds": elapsed,
-            "elapsed": format_duration(elapsed),
-        })
-        print(f"Finished 3D t-SNE: {name} in {format_duration(elapsed)}", flush=True)
+    print(f"Fitting 3D MST embedding with n_msts={n_msts} ...", flush=True)
+    started = time.perf_counter()
+    embedding = estimator.fit_transform(X)
+    elapsed = time.perf_counter() - started
 
-    figure = make_subplots(
-        rows=1,
-        cols=len(results),
-        specs=[[{"type": "scene"} for _ in results]],
-        subplot_titles=[
-            f"{item['configuration']}<br>perplexity={item['perplexity']}, {item['elapsed']}"
-            for item in results
-        ],
-        horizontal_spacing=0.025,
+    n_neighbors = min(trustworthiness_neighbors, (len(X) - 1) // 2)
+    score = trustworthiness(X, embedding, n_neighbors=n_neighbors)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    knn_accuracy = cross_val_score(
+        KNeighborsClassifier(n_neighbors=5), embedding, labels, cv=cv
+    ).mean()
+    elapsed_text = format_duration(elapsed)
+    print(
+        f"Finished 3D MST embedding in {elapsed_text} on {estimator.device_}",
+        flush=True,
     )
-    digit_labels = labels.astype(int)
-    for column, result in enumerate(results, start=1):
-        embedding = result["embedding"]
-        figure.add_trace(
+
+    figure = go.Figure(
+        data=[
             go.Scatter3d(
                 x=embedding[:, 0],
                 y=embedding[:, 1],
                 z=embedding[:, 2],
                 mode="markers",
-                name=result["configuration"],
                 marker={
-                    "size": 2.5,
+                    "size": 3,
                     "opacity": 0.8,
-                    "color": digit_labels,
+                    "color": labels.astype(int),
                     "colorscale": "Turbo",
                     "cmin": 0,
                     "cmax": 9,
-                    "showscale": column == 1,
                     "colorbar": {
                         "title": "Digit",
                         "tickmode": "array",
                         "tickvals": list(range(10)),
-                        "x": 0.285,
-                        "len": 0.75,
                     },
                 },
-                customdata=digit_labels,
+                customdata=labels,
                 hovertemplate="Digit %{customdata}<extra></extra>",
                 showlegend=False,
-            ),
-            row=1,
-            col=column,
-        )
-        figure.update_scenes(
-            dict(
-                xaxis_title="Dimension 1",
-                yaxis_title="Dimension 2",
-                zaxis_title="Dimension 3",
-                aspectmode="cube",
-            ),
-            row=1,
-            col=column,
-        )
-
-    figure.update_layout(
-        title="MNIST t-SNE embeddings in 3D — drag each panel to rotate",
-        height=650,
-        width=max(1100, 480 * len(results)),
-        margin={"l": 0, "r": 0, "t": 100, "b": 10},
+            )
+        ]
     )
-    return results, figure
+    figure.update_layout(
+        title=(
+            f"3D Iterated MST embedding (n_msts={n_msts})<br>"
+            f"trustworthiness={score:.3f}; 5-NN CV={knn_accuracy:.3f}; "
+            f"runtime={elapsed_text} ({estimator.device_})"
+        ),
+        scene={
+            "xaxis_title": "Dimension 1",
+            "yaxis_title": "Dimension 2",
+            "zaxis_title": "Dimension 3",
+            "aspectmode": "cube",
+        },
+        height=750,
+        width=1000,
+        margin={"l": 0, "r": 0, "t": 110, "b": 0},
+    )
+    summary = pd.DataFrame([{
+        "n_msts": n_msts,
+        "n_components": 3,
+        "trustworthiness": score,
+        "5-NN 5-fold CV accuracy": knn_accuracy,
+        "seconds": elapsed,
+        "elapsed": elapsed_text,
+        "device": estimator.device_,
+    }])
+    return embedding, summary, figure

@@ -11,7 +11,7 @@ It follows the algorithm described in [IDEA.md](IDEA.md).
 python -m pip install .
 ```
 
-To run the parameter-sweep notebook, install its plotting and UMAP dependencies:
+To run the notebooks, install their plotting dependencies:
 
 ```bash
 python -m pip install ".[notebook]"
@@ -48,7 +48,8 @@ assert embedding_3d.shape == (len(X), 3)
 
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
-2,000).
+2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)
+uses `n_components=3` and Plotly to rotate the learned embedding.
 
 The estimator exposes `fit`, `fit_transform`, and `transform`. Since the
 coordinates are optimized jointly for all training samples, `transform` returns

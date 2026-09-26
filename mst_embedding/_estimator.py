@@ -1,4 +1,4 @@
-"""Scikit-learn estimator for an iterated-MST 2D embedding."""
+"""Scikit-learn estimator for an iterated-MST embedding."""
 
 from __future__ import annotations
 
