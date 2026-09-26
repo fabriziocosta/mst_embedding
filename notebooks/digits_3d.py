@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import time
+import traceback
 
+import ipywidgets as widgets
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from IPython.display import clear_output, display
 from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
 
 try:  # Notebook execution puts this directory directly on sys.path.
-    from digits_sweep import format_duration
+    from digits_sweep import format_duration, load_mnist_data
 except ModuleNotFoundError:  # Also support importing as notebooks.digits_3d.
-    from .digits_sweep import format_duration
+    from .digits_sweep import format_duration, load_mnist_data
 from mst_embedding import IteratedMSTEmbedding
 
 
@@ -134,3 +137,195 @@ def fit_and_plot_mst_3d(
         "device": estimator.device_,
     }])
     return embedding, summary, figure
+
+
+def _load_balanced_pool(max_instances, random_state):
+    X_pool, labels_pool = load_mnist_data(
+        sample_size=max_instances,
+        random_state=random_state,
+    )
+    rng = np.random.RandomState(random_state)
+    class_indices = [
+        rng.permutation(np.flatnonzero(labels_pool == label))
+        for label in np.unique(labels_pool)
+    ]
+    per_class = min(len(indices) for indices in class_indices)
+    balanced_order = np.stack(
+        [indices[:per_class] for indices in class_indices], axis=1
+    ).reshape(-1)
+    return X_pool[balanced_order], labels_pool[balanced_order]
+
+
+def display_interactive_mst_3d(
+    max_instances=4000,
+    initial_sample_count=1000,
+    random_state=42,
+):
+    """Display sliders for a 3D MST embedding and fit on button click."""
+    if max_instances < 500:
+        raise ValueError("max_instances must be at least 500.")
+    if not 500 <= initial_sample_count <= max_instances:
+        raise ValueError("initial_sample_count must be between 500 and max_instances.")
+
+    X_pool, labels_pool = _load_balanced_pool(max_instances, random_state)
+    max_instances = len(X_pool)
+    print(
+        f"Balanced pool available: {max_instances:,} samples. "
+        f"The sample-count slider starts at {initial_sample_count:,}."
+    )
+
+    sample_count = widgets.IntSlider(
+        value=initial_sample_count,
+        min=500,
+        max=max_instances,
+        step=250,
+        description="Instances",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    n_msts = widgets.IntSlider(
+        value=8, min=1, max=20, step=1,
+        description="MSTs", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    rank_exponent = widgets.FloatSlider(
+        value=1.0, min=0.0, max=3.0, step=0.25,
+        description="Rank exponent", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    n_epochs = widgets.IntSlider(
+        value=500, min=100, max=1000, step=100,
+        description="Epochs", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    batch_size = widgets.IntSlider(
+        value=4096, min=256, max=8192, step=256,
+        description="Batch size", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    learning_rate = widgets.FloatSlider(
+        value=0.05, min=0.01, max=0.10, step=0.01,
+        readout_format=".2f", description="Learning rate",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    negative_ratio = widgets.IntSlider(
+        value=4, min=0, max=10, step=1,
+        description="Negative ratio", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    lambda_rep = widgets.FloatSlider(
+        value=1.0, min=0.0, max=2.0, step=0.1,
+        readout_format=".1f", description="Repulsion",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    epsilon = widgets.FloatLogSlider(
+        value=1e-4, base=10, min=-8, max=-2, step=0.1,
+        description="Epsilon", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    random_state_slider = widgets.IntSlider(
+        value=random_state, min=0, max=1000, step=1,
+        description="Random state", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    trustworthiness_neighbors = widgets.IntSlider(
+        value=10, min=5, max=50, step=5,
+        description="Trustworthiness k", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    device = widgets.Dropdown(
+        options=["auto", "cpu", "mps"],
+        value="auto",
+        description="Device",
+        style={"description_width": "initial"},
+    )
+
+    fit_button = widgets.Button(
+        description="Fit 3D embedding",
+        button_style="primary",
+        icon="play",
+    )
+    reset_button = widgets.Button(
+        description="Reset sliders",
+        tooltip="Restore default values",
+        icon="undo",
+    )
+    output = widgets.Output()
+
+    def reset_sliders(_=None):
+        sample_count.value = min(1000, max_instances)
+        n_msts.value = 8
+        rank_exponent.value = 1.0
+        n_epochs.value = 500
+        batch_size.value = 4096
+        learning_rate.value = 0.05
+        negative_ratio.value = 4
+        lambda_rep.value = 1.0
+        epsilon.value = 1e-4
+        random_state_slider.value = 42
+        trustworthiness_neighbors.value = 10
+        device.value = "auto"
+
+    def fit_and_display(_=None):
+        fit_button.disabled = True
+        with output:
+            clear_output(wait=True)
+            try:
+                n_samples = sample_count.value
+                X = X_pool[:n_samples]
+                labels = labels_pool[:n_samples]
+                embedding, summary, figure = fit_and_plot_mst_3d(
+                    X,
+                    labels,
+                    n_msts=n_msts.value,
+                    rank_weight_exponent=rank_exponent.value,
+                    n_epochs=n_epochs.value,
+                    batch_size=batch_size.value,
+                    learning_rate=learning_rate.value,
+                    negative_ratio=negative_ratio.value,
+                    lambda_rep=lambda_rep.value,
+                    epsilon=epsilon.value,
+                    random_state=random_state_slider.value,
+                    device=device.value,
+                    trustworthiness_neighbors=trustworthiness_neighbors.value,
+                )
+                display(figure)
+                display(summary)
+            except Exception:
+                traceback.print_exc()
+            finally:
+                fit_button.disabled = False
+
+    fit_button.on_click(fit_and_display)
+    reset_button.on_click(reset_sliders)
+    controls = widgets.VBox(
+        [
+            widgets.HBox([sample_count, n_msts, rank_exponent]),
+            widgets.HBox([n_epochs, batch_size, learning_rate]),
+            widgets.HBox([negative_ratio, lambda_rep, epsilon]),
+            widgets.HBox([random_state_slider, trustworthiness_neighbors, device]),
+        ]
+    )
+    display(controls, widgets.HBox([fit_button, reset_button]), output)
+    return {
+        "controls": controls,
+        "fit_button": fit_button,
+        "reset_button": reset_button,
+        "output": output,
+        "sliders": {
+            "sample_count": sample_count,
+            "n_msts": n_msts,
+            "rank_weight_exponent": rank_exponent,
+            "n_epochs": n_epochs,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "negative_ratio": negative_ratio,
+            "lambda_rep": lambda_rep,
+            "epsilon": epsilon,
+            "random_state": random_state_slider,
+            "trustworthiness_neighbors": trustworthiness_neighbors,
+            "device": device,
+        },
+    }

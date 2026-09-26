@@ -49,7 +49,8 @@ assert embedding_3d.shape == (len(X), 3)
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
 2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)
-uses `n_components=3` and Plotly to rotate the learned embedding.
+uses sliders for sample size and estimator settings, with `n_components=3`
+and Plotly controls to rotate the learned embedding.
 The [interactive 2D notebook](notebooks/digits_2d_interactive.ipynb) adds
 sliders for sample count and embedding parameters; it requires the notebook
 extras, including `ipywidgets`.
