@@ -10,6 +10,12 @@ It follows the algorithm described in [IDEA.md](IDEA.md).
 python -m pip install .
 ```
 
+To run the parameter-sweep notebook, install its plotting and UMAP dependencies:
+
+```bash
+python -m pip install ".[notebook]"
+```
+
 ## Example
 
 ```python

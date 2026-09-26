@@ -167,3 +167,72 @@ def run_sweep(X, labels, parameter, values, base_params, n_neighbors=10, n_jobs=
          for row in results]
     )
     return results, summary
+
+
+def run_umap_comparison(
+    X,
+    labels,
+    n_neighbors=15,
+    min_dist=0.1,
+    n_epochs=500,
+    random_state=42,
+    trustworthiness_neighbors=10,
+):
+    """Fit and plot a reference UMAP embedding with the same evaluation scores."""
+    try:
+        from umap import UMAP
+    except ImportError as exc:
+        raise ImportError(
+            'UMAP comparison requires the notebook extra: '
+            'python -m pip install "mst-embedding[notebook]"'
+        ) from exc
+
+    reducer = UMAP(
+        n_components=2,
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        n_epochs=n_epochs,
+        metric="euclidean",
+        random_state=random_state,
+        n_jobs=1,
+    )
+    started = time.perf_counter()
+    embedding = reducer.fit_transform(X)
+    elapsed = time.perf_counter() - started
+
+    score = trustworthiness(
+        X, embedding, n_neighbors=min(trustworthiness_neighbors, len(X) - 1)
+    )
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    knn_accuracy = cross_val_score(
+        KNeighborsClassifier(n_neighbors=5), embedding, labels, cv=cv
+    ).mean()
+
+    fig, ax = plt.subplots(figsize=(7, 6), constrained_layout=True)
+    points = ax.scatter(
+        embedding[:, 0], embedding[:, 1], c=labels, cmap="tab10",
+        vmin=-0.5, vmax=9.5, s=7, alpha=0.8, linewidths=0,
+    )
+    ax.set_title(
+        f"UMAP (n_neighbors={n_neighbors}, min_dist={min_dist})\n"
+        f"trustworthiness={score:.3f}\n"
+        f"5-NN 5-fold CV accuracy={knn_accuracy:.3f}; "
+        f"runtime={format_duration(elapsed)}"
+    )
+    ax.set_xlabel("Embedding dimension 1")
+    ax.set_ylabel("Embedding dimension 2")
+    colorbar = fig.colorbar(points, ax=ax, ticks=range(10))
+    colorbar.set_label("Digit label")
+    plt.show()
+
+    summary = pd.DataFrame([{
+        "method": "UMAP",
+        "n_neighbors": n_neighbors,
+        "min_dist": min_dist,
+        "n_epochs": n_epochs,
+        "trustworthiness": score,
+        "5-NN 5-fold CV accuracy": knn_accuracy,
+        "seconds": elapsed,
+        "elapsed": format_duration(elapsed),
+    }])
+    return embedding, summary
