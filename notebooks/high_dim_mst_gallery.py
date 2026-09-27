@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import pickle
-import tarfile
+import numbers
 import time
 from pathlib import Path
 from urllib.request import urlretrieve
@@ -91,56 +89,11 @@ def _load_kmnist() -> tuple[np.ndarray, np.ndarray]:
     return images.reshape(len(images), -1), labels
 
 
-def _load_cifar10() -> tuple[np.ndarray, np.ndarray]:
-    """Load CIFAR-10's official Python archive and cache the verified download."""
-    archive_url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
-    expected_md5 = "c58f30108f718f92721af3b95e74349a"
-    archive_path = Path(get_data_home()) / "cifar-10-python.tar.gz"
-
-    def has_expected_checksum(path: Path) -> bool:
-        digest = hashlib.md5(usedforsecurity=False)
-        with path.open("rb") as archive_file:
-            for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest() == expected_md5
-
-    if not archive_path.exists() or not has_expected_checksum(archive_path):
-        temporary_path = archive_path.with_suffix(archive_path.suffix + ".tmp")
-        try:
-            urlretrieve(archive_url, temporary_path)
-            if not has_expected_checksum(temporary_path):
-                raise ValueError("Downloaded CIFAR-10 archive failed its MD5 checksum.")
-            temporary_path.replace(archive_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-
-    images = []
-    labels = []
-    batch_names = [
-        *(f"cifar-10-batches-py/data_batch_{index}" for index in range(1, 6)),
-        "cifar-10-batches-py/test_batch",
-    ]
-    with tarfile.open(archive_path, mode="r:gz") as archive:
-        for batch_name in batch_names:
-            batch_file = archive.extractfile(batch_name)
-            if batch_file is None:
-                raise ValueError(f"CIFAR-10 archive is missing {batch_name}.")
-            with batch_file:
-                batch = pickle.load(batch_file, encoding="bytes")
-            images.append(batch[b"data"])
-            labels.extend(batch[b"labels"])
-
-    images = np.concatenate(images)
-    rgb_images = images.reshape(len(images), 3, 32, 32).transpose(0, 2, 3, 1)
-    return rgb_images.reshape(len(images), -1), np.asarray(labels, dtype=np.int64)
-
-
 def _load_datasets(max_samples: int, random_state: int):
     loaders = {
         "MNIST (28×28)": lambda: _load_openml("mnist_784"),
         "Fashion-MNIST (28×28)": lambda: _load_openml("Fashion-MNIST"),
         "Kuzushiji-MNIST (28×28)": _load_kmnist,
-        "CIFAR-10 RGB (32×32×3)": _load_cifar10,
     }
     datasets = {}
     errors = {}
@@ -168,6 +121,53 @@ def _load_datasets(max_samples: int, random_state: int):
     return datasets, errors
 
 
+def _plot_dataset_examples(
+    name: str,
+    X: np.ndarray,
+    labels: np.ndarray,
+    *,
+    n_rows: int,
+    random_state: int,
+) -> None:
+    """Show a random image grid with one column for each class."""
+    image_side = int(round(np.sqrt(X.shape[1])))
+    if image_side * image_side != X.shape[1]:
+        raise ValueError(
+            f"Cannot plot {name}: expected flattened square grayscale images, "
+            f"got {X.shape[1]} features."
+        )
+
+    classes = np.unique(labels)
+    rng = np.random.default_rng(random_state)
+    fig, axes = plt.subplots(
+        n_rows,
+        len(classes),
+        figsize=(max(6, 0.725 * len(classes)), max(1.1, 0.825 * n_rows)),
+        squeeze=False,
+    )
+    for column, class_label in enumerate(classes):
+        class_indices = np.flatnonzero(labels == class_label)
+        selected = rng.choice(
+            class_indices,
+            size=min(n_rows, len(class_indices)),
+            replace=False,
+        )
+        for row, sample_index in enumerate(selected):
+            pixels = np.asarray(X[sample_index], dtype=np.float32).reshape(
+                image_side, image_side
+            )
+            pixels = np.clip(pixels / 255.0, 0.0, 1.0)
+            ax = axes[row, column]
+            ax.imshow(pixels, cmap="gray_r", vmin=0.0, vmax=1.0)
+            ax.set_axis_off()
+            if row == 0:
+                ax.set_title(str(class_label))
+    fig.suptitle(f"{name}: sample images by class")
+    fig.tight_layout()
+    display(fig)
+    plt.close(fig)
+
+
 def _default_device() -> str:
     mps = getattr(torch.backends, "mps", None)
     return "mps" if mps is not None and mps.is_available() else "auto"
@@ -189,6 +189,7 @@ def run_high_dim_mst_gallery(
     n_local_msts: int = 8,
     n_jobs: int = -1,
     minibatch_size: int = 1024,
+    sample_plot_rows: int = 2,
     random_state: int = 42,
     device: str | None = None,
 ) -> dict[str, object]:
@@ -201,12 +202,25 @@ def run_high_dim_mst_gallery(
     """
     if max_samples < 10:
         raise ValueError("max_samples must be at least 10.")
+    if (
+        isinstance(sample_plot_rows, (bool, np.bool_))
+        or not isinstance(sample_plot_rows, numbers.Integral)
+        or sample_plot_rows < 1
+    ):
+        raise ValueError("sample_plot_rows must be a positive integer.")
     resolved_device = _default_device() if device is None else device
     datasets, load_errors = _load_datasets(max_samples, random_state)
 
     embeddings = {}
     summaries = []
     for name, (X, labels) in datasets.items():
+        _plot_dataset_examples(
+            name,
+            X,
+            labels,
+            n_rows=int(sample_plot_rows),
+            random_state=random_state,
+        )
         print(f"Fitting {name} on {resolved_device} ...", flush=True)
         pipeline_steps = [("normalize", StandardScaler())]
         if use_patch_preprocessor:
@@ -217,9 +231,7 @@ def run_high_dim_mst_gallery(
                         n_patches=n_patches,
                         n_components=patch_n_components,
                         position_encoding_size=position_encoding_size,
-                        image_shape=(32, 32, 3)
-                        if name.startswith("CIFAR-10")
-                        else None,
+                        image_shape=None,
                         random_state=random_state,
                     ),
                 )
