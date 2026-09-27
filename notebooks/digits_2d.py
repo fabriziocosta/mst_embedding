@@ -46,7 +46,7 @@ def display_interactive_embedding(
 ) -> dict[str, object]:
     """Load a fixed data pool and display controls for fitting a 2D embedding.
 
-    Sliders configure sample count, MST count, rank weighting, training epochs,
+    Sliders configure sample count, MST count, training epochs,
     learning rate, repulsion, and negative sampling. The embedding is fit only
     when the user clicks the fit button. Returns widget references for notebook
     customization.
@@ -84,15 +84,6 @@ def display_interactive_embedding(
         max=64,
         step=1,
         description="MSTs",
-        continuous_update=False,
-        style={"description_width": "initial"},
-    )
-    rank_exponent = widgets.FloatSlider(
-        value=1.0,
-        min=0.0,
-        max=3.0,
-        step=0.01,
-        description="Rank exponent",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -177,7 +168,6 @@ def display_interactive_embedding(
     def reset_sliders(_=None) -> None:
         sample_count.value = min(1000, max_instances)
         n_msts.value = 10
-        rank_exponent.value = 1.0
         n_epochs.value = 1000
         learning_rate.value = 0.05
         lambda_rep.value = 0.5
@@ -197,7 +187,6 @@ def display_interactive_embedding(
                 labels = labels_pool[:n_samples]
                 estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
-                    rank_weight_exponent=rank_exponent.value,
                     n_components=2,
                     n_epochs=n_epochs.value,
                     batch_size=8192,
@@ -240,7 +229,7 @@ def display_interactive_embedding(
                 ax.set(
                     title=(
                         f"2D IMSTE · {n_samples:,} samples · "
-                        f"{n_msts.value} MSTs · α={rank_exponent.value:g} · "
+                        f"{n_msts.value} MSTs · inverse-rank weights · "
                         f"{n_epochs.value} epochs{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
@@ -273,7 +262,7 @@ def display_interactive_embedding(
 
     controls = widgets.VBox(
         [
-            widgets.HBox([sample_count, n_msts, rank_exponent]),
+            widgets.HBox([sample_count, n_msts]),
             widgets.HBox([n_epochs, learning_rate, lambda_rep, negative_ratio]),
             widgets.HBox([repulsion_type]),
             widgets.HBox([compute_knn, device]),
@@ -290,7 +279,6 @@ def display_interactive_embedding(
         "sliders": {
             "sample_count": sample_count,
             "n_msts": n_msts,
-            "rank_weight_exponent": rank_exponent,
             "n_epochs": n_epochs,
             "learning_rate": learning_rate,
             "lambda_rep": lambda_rep,

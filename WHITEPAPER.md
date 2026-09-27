@@ -53,12 +53,7 @@ $$
 y_i \in \mathbb{R}^q.
 $$
 
-The number of trees is R. The non-negative exponent that controls how quickly
-later trees lose influence satisfies:
-
-$$
-\alpha \geq 0.
-$$
+The number of trees is R.
 
 ## 3. Graph construction
 
@@ -71,25 +66,14 @@ $$
 For each requested rank, the method finds an MST over the remaining available
 edges, adds the tree's edges to the embedding graph, and removes those edges
 in both directions. Thus no undirected edge appears in more than one tree.
-Each edge receives a weight based on the rank of the tree that first selected
-it:
+An edge first selected at rank $r$ receives the fixed inverse-rank weight:
 
 $$
-w_{ij}=r^{-\alpha}.
+w_{ij}=\frac{1}{r}.
 $$
 
-The default exponent gives inverse-rank weights. Setting the exponent to zero
-gives every rank equal weight; a larger exponent reduces later trees'
-influence more quickly. The edge weight depends on its tree rank, not on a
-separately applied distance decay. The two common settings are:
-
-$$
-\alpha=1, w_r=r^{-1}.
-$$
-
-$$
-\alpha=0, w_r=1.
-$$
+The edge weight depends on its tree rank, not on a separately applied distance
+decay.
 
 When all requested trees can be constructed, the resulting graph contains:
 
@@ -154,7 +138,7 @@ from nodes that are neither the source nor one of its graph neighbors. The
 squared embedding distance for a sampled pair is:
 
 $$
-d_{uv}^2=\left(\sum_{k=1}^{q}|y_{uk}-y_{vk}|^m\right)^{2/m}.
+d_{uv}^2=\sum_{k=1}^{q}(y_{uk}-y_{vk})^2.
 $$
 
 For each sampled negative pair, the default Bernoulli negative log-likelihood
@@ -215,12 +199,12 @@ negative pairs for eligible sources, computes repulsion, and updates all
 coordinates with Adam. After each update it subtracts the coordinate mean,
 removing global translation drift without changing pairwise differences.
 
-The default estimator settings use Euclidean distance for graph construction and embedding.
+The estimator uses Euclidean distance for graph construction and embedding,
+with a fixed inverse-rank weight for each edge.
 
 | Parameter | Default | Role |
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
-| `rank_weight_exponent` | 1.0 | Decay of edge weights by tree rank |
 | `attraction_normalization` | `mean` | Attraction denominator: edge count or total edge weight |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |

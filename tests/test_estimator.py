@@ -129,11 +129,12 @@ def test_invalid_data_raise_clear_error():
 def test_exact_graph_uses_euclidean_distances():
     X = small_data()
     estimator = IteratedMinimumSpanningTreeEmbedder(
-        n_msts=1, n_epochs=0, random_state=19
+        n_msts=2, n_epochs=0, random_state=19
     ).fit(X)
-    expected, weights = _iterated_mst_edges(cdist(X, X, metric="euclidean"), 1, 1.0)
+    expected, weights = _iterated_mst_edges(cdist(X, X, metric="euclidean"), 2)
     np.testing.assert_array_equal(estimator.graph_edges_, expected)
     np.testing.assert_array_equal(estimator.graph_weights_, weights)
+    assert set(estimator.graph_weights_) == {1.0, 0.5}
 
 
 def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale():

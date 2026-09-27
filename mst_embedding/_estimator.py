@@ -78,7 +78,6 @@ def _squared_euclidean_distance(delta: torch.Tensor) -> torch.Tensor:
 def _iterated_mst_edges(
     distances: np.ndarray,
     n_msts: int,
-    rank_weight_exponent: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return edge-disjoint MSTs, preserving zero-distance edges.
 
@@ -109,7 +108,7 @@ def _iterated_mst_edges(
             if parent[node] != -1:
                 other = int(parent[node])
                 edges.append((other, node))
-                weights.append(rank ** (-rank_weight_exponent))
+                weights.append(1.0 / rank)
                 available[other, node] = False
                 available[node, other] = False
 
@@ -136,11 +135,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     ----------
     n_msts : int, default=10
         Number of edge-disjoint minimum spanning trees to construct.
-    rank_weight_exponent : float, default=1.0
-        Exponent controlling how edge weights decay with MST rank. An edge
-        first appearing in rank ``r`` receives weight ``r**(-rank_weight_exponent)``.
-        Set to 0 for equal weights across ranks; the default of 1 gives the
-        original inverse-rank weighting.
     attraction_normalization : {'mean', 'weight_sum'}, default='mean'
         Normalize the weighted attraction by the number of graph edges
         ('mean', the original behavior) or by the sum of graph edge weights.
@@ -196,7 +190,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         random_state: int | None = 42,
         epsilon: float = 1e-4,
         device: str = "auto",
-        rank_weight_exponent: float = 1.0,
         attraction_normalization: str = "mean",
         attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
         | None = None,
@@ -204,7 +197,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         repulsion_type: str = "bernoulli",
     ) -> None:
         self.n_msts = n_msts
-        self.rank_weight_exponent = rank_weight_exponent
         self.attraction_normalization = attraction_normalization
         self.n_components = n_components
         self.n_epochs = n_epochs
@@ -228,9 +220,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         fit_started = time.perf_counter()
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)
-        rank_weight_exponent = _finite_nonnegative(
-            "rank_weight_exponent", self.rank_weight_exponent
-        )
         if self.attraction_normalization not in {"mean", "weight_sum"}:
             raise ValueError(
                 "attraction_normalization must be 'mean' or 'weight_sum'."
@@ -281,7 +270,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
         np.fill_diagonal(distances, 0.0)
         edges, edge_weights = _iterated_mst_edges(
-            distances, n_msts, rank_weight_exponent
+            distances, n_msts
         )
         self.graph_construction_time_ = time.perf_counter() - graph_started
 

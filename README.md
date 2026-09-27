@@ -54,9 +54,8 @@ assert embedding_3d.shape == (len(X), 3)
 
 The method computes all pairwise Euclidean distances and repeatedly builds an
 MST, removing each selected edge before constructing the next tree. The union
-contains `n_msts` edge-disjoint trees. An edge
-first selected at rank `r` gets weight `r ** (-rank_weight_exponent)`, so later
-trees contribute less when the default exponent is 1.
+contains `n_msts` edge-disjoint trees. An edge first selected at rank `r` gets
+weight `1 / r`, so later trees contribute less.
 
 ### Optimize coordinates
 
@@ -129,13 +128,11 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=10`, `rank_weight_exponent=1.0`,
-`attraction_normalization="mean"`,
+The main parameters are `n_msts=10`, `attraction_normalization="mean"`,
 `n_components=2`, `n_epochs=1000`, `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
-`rank ** (-rank_weight_exponent)`: the default of 1.0 gives inverse-rank
-weighting, while 0 gives equal weights to all ranks. `negative_ratio` samples
+`1 / rank`, so later trees receive smaller weights. `negative_ratio` samples
 that many non-neighbors from each endpoint of each positive edge. On macOS,
 `auto` uses PyTorch's MPS
 backend for datasets with at least 2,048 samples; smaller workloads use the CPU

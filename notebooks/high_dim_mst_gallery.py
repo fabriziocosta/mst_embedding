@@ -18,15 +18,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts the repository root on sys.path.
-    from mst_embedding import (
-        ImagePatchRandomProjection,
-        IteratedMinimumSpanningTreeEmbedder,
-    )
+    from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 except ModuleNotFoundError:  # Also support importing as notebooks.high_dim_mst_gallery.
-    from ..mst_embedding import (
-        ImagePatchRandomProjection,
-        IteratedMinimumSpanningTreeEmbedder,
-    )
+    from ..mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
 def _stratified_sample(
@@ -176,15 +170,10 @@ def _default_device() -> str:
 def run_high_dim_mst_gallery(
     *,
     max_samples: int = 1000,
-    use_patch_preprocessor: bool = True,
-    n_patches: int | tuple[int, int] = 5,
-    patch_n_components: int = 10,
-    position_encoding_size: int | None = None,
     n_msts: int = 10,
     n_epochs: int = 1000,
     batch_size: int = 4096,
     negative_ratio: int = 5,
-    rank_weight_exponent: float = 1.0,
     lambda_rep: float = 0.5,
     repulsion_type: str = "bernoulli",
     sample_plot_rows: int = 2,
@@ -193,10 +182,9 @@ def run_high_dim_mst_gallery(
 ) -> dict[str, object]:
     """Fit and display 2D IMSTE embeddings for several image datasets.
 
-    Dataset loading, normalization, optional patch projection, fitting, and plotting
-    happen here so the notebook can remain a thin launcher. Failed remote
-    dataset loads are reported and skipped; successful fits are plotted as
-    they finish.
+    Dataset loading, normalization, fitting, and plotting happen here so the
+    notebook can remain a thin launcher. Failed remote dataset loads are
+    reported and skipped; successful fits are plotted as they finish.
     """
     if max_samples < 10:
         raise ValueError("max_samples must be at least 10.")
@@ -220,98 +208,49 @@ def run_high_dim_mst_gallery(
             random_state=random_state,
         )
         print(f"Fitting {name} on {resolved_device} ...", flush=True)
-        pipeline_steps = [("normalize", StandardScaler())]
-        if use_patch_preprocessor:
-            pipeline_steps.append(
+        pipeline = Pipeline(
+            [
+                ("normalize", StandardScaler()),
                 (
-                    "patch_projection",
-                    ImagePatchRandomProjection(
-                        n_patches=n_patches,
-                        n_components=patch_n_components,
-                        position_encoding_size=position_encoding_size,
-                        image_shape=None,
+                    "imste",
+                    IteratedMinimumSpanningTreeEmbedder(
+                        n_msts=n_msts,
+                        n_components=2,
+                        n_epochs=n_epochs,
+                        batch_size=batch_size,
+                        learning_rate=0.05,
+                        negative_ratio=negative_ratio,
+                        lambda_rep=lambda_rep,
+                        repulsion_type=repulsion_type,
                         random_state=random_state,
+                        device=resolved_device,
                     ),
-                )
-            )
-        pipeline_steps.append(
-            (
-                "imste",
-                IteratedMinimumSpanningTreeEmbedder(
-                    n_msts=n_msts,
-                    n_components=2,
-                    n_epochs=n_epochs,
-                    batch_size=batch_size,
-                    learning_rate=0.05,
-                    negative_ratio=negative_ratio,
-                    lambda_rep=lambda_rep,
-                    rank_weight_exponent=rank_weight_exponent,
-                    repulsion_type=repulsion_type,
-                    random_state=random_state,
-                    device=resolved_device,
                 ),
-            )
+            ]
         )
-        pipeline = Pipeline(pipeline_steps)
         started = time.perf_counter()
         embedding = pipeline.fit_transform(X)
         elapsed = time.perf_counter() - started
         print(f"  pipeline completed in {elapsed:.2f} seconds", flush=True)
         estimator = pipeline.named_steps["imste"]
         mst_summary = f"{n_msts} MSTs"
-        if use_patch_preprocessor:
-            projection = pipeline.named_steps["patch_projection"]
-            feature_count = projection.n_features_out_
-            patch_height, patch_width = projection.patch_shape_
-            patch_channels = projection.image_shape_[2]
-            patch_grid = (projection.n_patch_rows_, projection.n_patch_columns_)
-            print(
-                f"  preprocessing output: {embedding.shape[0]:,} samples × "
-                f"{feature_count:,} features "
-                f"({projection.n_patches_} patches × "
-                f"{projection.n_features_per_patch_} values per patch)\n"
-                f"  patch features: {projection.n_components} projected + "
-                f"{projection.position_encoding_size_} positional = "
-                f"{projection.n_features_per_patch_} values\n"
-                f"  patch layout: {patch_grid[0]}×{patch_grid[1]} grid; each padded patch "
-                f"is {patch_height}×{patch_width}×{patch_channels} "
-                "(height × width × channels)",
-                flush=True,
-            )
-            patch_summary = {
-                "patch_grid": f"{patch_grid[0]}×{patch_grid[1]}",
-                "padded_patch_shape": f"{patch_height}×{patch_width}×{patch_channels}",
-                "patch_features": projection.n_components,
-                "position_encoding_size": projection.position_encoding_size_,
-                "features_per_patch": projection.n_features_per_patch_,
-            }
-        else:
-            feature_count = X.shape[1]
-            print(
-                f"  patch preprocessing disabled; IMSTE input: "
-                f"{embedding.shape[0]:,} samples × {feature_count:,} features",
-                flush=True,
-            )
-            patch_summary = {
-                "patch_grid": None,
-                "padded_patch_shape": None,
-                "patch_features": None,
-                "position_encoding_size": None,
-                "features_per_patch": None,
-            }
+        feature_count = X.shape[1]
+        print(
+            f"  standardized IMSTE input: {embedding.shape[0]:,} samples × "
+            f"{feature_count:,} features",
+            flush=True,
+        )
         embeddings[name] = embedding
         summaries.append(
             {
                 "dataset": name,
                 "samples": len(X),
                 "input_features": X.shape[1],
-                "preprocessed_features": feature_count,
-                **patch_summary,
+                "features": feature_count,
                 "classes": len(np.unique(labels)),
                 "n_msts": n_msts,
                 "n_epochs": n_epochs,
                 "negative_ratio": negative_ratio,
-                "rank_weight_exponent": rank_weight_exponent,
                 "lambda_rep": lambda_rep,
                 "repulsion_type": repulsion_type,
                 "unique_graph_edges": len(estimator.graph_edges_),
