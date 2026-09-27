@@ -176,6 +176,7 @@ def _default_device() -> str:
 def run_high_dim_mst_gallery(
     *,
     max_samples: int = 1000,
+    use_patch_preprocessor: bool = True,
     n_patches: int | tuple[int, int] = 5,
     patch_n_components: int = 10,
     position_encoding_size: int | None = None,
@@ -193,7 +194,7 @@ def run_high_dim_mst_gallery(
 ) -> dict[str, object]:
     """Fit and display 2D IMSTE embeddings for several image datasets.
 
-    Dataset loading, normalization, patch projection, fitting, and plotting
+    Dataset loading, normalization, optional patch projection, fitting, and plotting
     happen here so the notebook can remain a thin launcher. Failed remote
     dataset loads are reported and skipped; successful fits are plotted as
     they finish.
@@ -207,9 +208,9 @@ def run_high_dim_mst_gallery(
     summaries = []
     for name, (X, labels) in datasets.items():
         print(f"Fitting {name} on {resolved_device} ...", flush=True)
-        pipeline = Pipeline(
-            [
-                ("normalize", StandardScaler()),
+        pipeline_steps = [("normalize", StandardScaler())]
+        if use_patch_preprocessor:
+            pipeline_steps.append(
                 (
                     "patch_projection",
                     ImagePatchRandomProjection(
@@ -221,76 +222,99 @@ def run_high_dim_mst_gallery(
                         else None,
                         random_state=random_state,
                     ),
+                )
+            )
+        pipeline_steps.append(
+            (
+                "imste",
+                IteratedMinimumSpanningTreeEmbedder(
+                    n_msts=n_msts,
+                    n_components=2,
+                    n_epochs=n_epochs,
+                    batch_size=batch_size,
+                    learning_rate=0.05,
+                    negative_ratio=4,
+                    lambda_rep=1.0,
+                    rank_weight_exponent=1.0,
+                    random_state=random_state,
+                    device=resolved_device,
+                    graph_mode=graph_mode,
+                    n_clusters=n_clusters,
+                    n_coarse_msts=n_coarse_msts,
+                    n_local_msts=n_local_msts,
+                    n_jobs=n_jobs,
+                    minibatch_size=minibatch_size,
                 ),
-                (
-                    "imste",
-                    IteratedMinimumSpanningTreeEmbedder(
-                        n_msts=n_msts,
-                        n_components=2,
-                        n_epochs=n_epochs,
-                        batch_size=batch_size,
-                        learning_rate=0.05,
-                        negative_ratio=4,
-                        lambda_rep=1.0,
-                        rank_weight_exponent=1.0,
-                        random_state=random_state,
-                        device=resolved_device,
-                        graph_mode=graph_mode,
-                        n_clusters=n_clusters,
-                        n_coarse_msts=n_coarse_msts,
-                        n_local_msts=n_local_msts,
-                        n_jobs=n_jobs,
-                        minibatch_size=minibatch_size,
-                    ),
-                ),
-            ]
+            )
         )
+        pipeline = Pipeline(pipeline_steps)
         started = time.perf_counter()
         embedding = pipeline.fit_transform(X)
         elapsed = time.perf_counter() - started
         print(f"  pipeline completed in {elapsed:.2f} seconds", flush=True)
-        projection = pipeline.named_steps["patch_projection"]
         estimator = pipeline.named_steps["imste"]
+        effective_coarse_msts = estimator.n_coarse_msts_
         mst_summary = (
-            f"{n_local_msts} local / {n_coarse_msts} coarse MSTs"
+            f"{n_local_msts} local / {effective_coarse_msts} coarse MSTs"
             if graph_mode == "hierarchical"
             else f"{n_msts} MSTs"
         )
-        patch_height, patch_width = projection.patch_shape_
-        patch_channels = projection.image_shape_[2]
-        patch_grid = (projection.n_patch_rows_, projection.n_patch_columns_)
-        print(
-            f"  preprocessing output: {embedding.shape[0]:,} samples × "
-            f"{projection.n_features_out_:,} features "
-            f"({projection.n_patches_} patches × "
-            f"{projection.n_features_per_patch_} values per patch)\n"
-            f"  patch features: {projection.n_components} projected + "
-            f"{projection.position_encoding_size_} positional = "
-            f"{projection.n_features_per_patch_} values\n"
-            f"  patch layout: {patch_grid[0]}×{patch_grid[1]} grid; each padded patch "
-            f"is {patch_height}×{patch_width}×{patch_channels} "
-            "(height × width × channels)",
-            flush=True,
-        )
+        if use_patch_preprocessor:
+            projection = pipeline.named_steps["patch_projection"]
+            feature_count = projection.n_features_out_
+            patch_height, patch_width = projection.patch_shape_
+            patch_channels = projection.image_shape_[2]
+            patch_grid = (projection.n_patch_rows_, projection.n_patch_columns_)
+            print(
+                f"  preprocessing output: {embedding.shape[0]:,} samples × "
+                f"{feature_count:,} features "
+                f"({projection.n_patches_} patches × "
+                f"{projection.n_features_per_patch_} values per patch)\n"
+                f"  patch features: {projection.n_components} projected + "
+                f"{projection.position_encoding_size_} positional = "
+                f"{projection.n_features_per_patch_} values\n"
+                f"  patch layout: {patch_grid[0]}×{patch_grid[1]} grid; each padded patch "
+                f"is {patch_height}×{patch_width}×{patch_channels} "
+                "(height × width × channels)",
+                flush=True,
+            )
+            patch_summary = {
+                "patch_grid": f"{patch_grid[0]}×{patch_grid[1]}",
+                "padded_patch_shape": f"{patch_height}×{patch_width}×{patch_channels}",
+                "patch_features": projection.n_components,
+                "position_encoding_size": projection.position_encoding_size_,
+                "features_per_patch": projection.n_features_per_patch_,
+            }
+        else:
+            feature_count = X.shape[1]
+            print(
+                f"  patch preprocessing disabled; IMSTE input: "
+                f"{embedding.shape[0]:,} samples × {feature_count:,} features",
+                flush=True,
+            )
+            patch_summary = {
+                "patch_grid": None,
+                "padded_patch_shape": None,
+                "patch_features": None,
+                "position_encoding_size": None,
+                "features_per_patch": None,
+            }
         embeddings[name] = embedding
         summaries.append(
             {
                 "dataset": name,
                 "samples": len(X),
                 "input_features": X.shape[1],
-                "preprocessed_features": projection.n_features_out_,
-                "patch_grid": f"{patch_grid[0]}×{patch_grid[1]}",
-                "padded_patch_shape": (
-                    f"{patch_height}×{patch_width}×{patch_channels}"
-                ),
-                "patch_features": projection.n_components,
-                "position_encoding_size": projection.position_encoding_size_,
-                "features_per_patch": projection.n_features_per_patch_,
+                "preprocessed_features": feature_count,
+                **patch_summary,
                 "classes": len(np.unique(labels)),
                 "n_msts": n_msts if graph_mode == "exact" else None,
                 "graph_mode": graph_mode,
                 "n_clusters": n_clusters if graph_mode == "hierarchical" else None,
-                "n_coarse_msts": n_coarse_msts if graph_mode == "hierarchical" else None,
+                "n_coarse_msts": effective_coarse_msts,
+                "requested_n_coarse_msts": (
+                    n_coarse_msts if graph_mode == "hierarchical" else None
+                ),
                 "n_local_msts": n_local_msts if graph_mode == "hierarchical" else None,
                 "minibatch_size": minibatch_size if graph_mode == "hierarchical" else None,
                 "n_epochs": n_epochs,
@@ -312,7 +336,7 @@ def run_high_dim_mst_gallery(
         )
         ax.set_title(
             f"{name} — {len(X):,} samples × "
-            f"{projection.n_features_out_:,} projected features; "
+            f"{feature_count:,} features passed to IMSTE; "
             f"{graph_mode} graph; {mst_summary}; "
             f"{n_epochs} epochs; {elapsed:.2f} s"
         )

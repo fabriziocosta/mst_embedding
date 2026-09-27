@@ -1,12 +1,17 @@
 import numpy as np
 import pytest
 import torch
+import sys
+from pathlib import Path
 from sklearn.base import clone
 from sklearn.cluster import MiniBatchKMeans
 from scipy.spatial.distance import cdist
 
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 from mst_embedding._estimator import _hierarchical_imst_edges, _iterated_mst_edges
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
+from hierarchical_quality_utils import run_trials
 
 
 def small_data():
@@ -29,6 +34,54 @@ def test_sklearn_api_and_training_transform():
     np.testing.assert_array_equal(estimator.transform(X), embedding)
     assert estimator.n_features_in_ == X.shape[1]
     assert estimator.device_ == "cpu"
+
+
+@pytest.mark.parametrize("graph_mode", ["exact", "hierarchical"])
+def test_fit_timing_diagnostics_are_finite_and_bounded(graph_mode):
+    params = dict(n_msts=1, n_epochs=0, random_state=5, graph_mode=graph_mode)
+    if graph_mode == "hierarchical":
+        params.update(n_clusters=3, n_coarse_msts=1, n_local_msts=1, n_jobs=1)
+    estimator = IteratedMinimumSpanningTreeEmbedder(**params).fit(small_data())
+
+    timings = np.array([
+        estimator.graph_construction_time_,
+        estimator.embedding_optimization_time_,
+        estimator.fit_time_,
+    ])
+    assert np.isfinite(timings).all()
+    assert np.all(timings >= 0)
+    assert estimator.graph_construction_time_ <= estimator.fit_time_
+    assert estimator.embedding_optimization_time_ <= estimator.fit_time_
+    assert (
+        estimator.graph_construction_time_ + estimator.embedding_optimization_time_
+        <= estimator.fit_time_
+    )
+
+
+def test_quality_sweep_records_failure_and_continues():
+    configurations = [
+        {"n_clusters": 10},
+        {"n_clusters": 25},
+        {"n_clusters": 50},
+    ]
+    attempted = []
+
+    def run_one(configuration):
+        n_clusters = configuration["n_clusters"]
+        attempted.append(n_clusters)
+        if n_clusters == 25:
+            raise RuntimeError("simulated trial failure")
+        return {"n_clusters": n_clusters, "score": 0.9}
+
+    results, failures = run_trials(configurations, run_one)
+
+    assert attempted == [10, 25, 50]
+    assert [row["n_clusters"] for row in results] == [10, 50]
+    assert failures == [{
+        "n_clusters": 25,
+        "error_type": "RuntimeError",
+        "error": "simulated trial failure",
+    }]
 
 
 def test_seed_reproduces_embedding():

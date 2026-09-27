@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numbers
 import sys
+import time
+import warnings
 from collections.abc import Callable
 
 import numpy as np
@@ -297,7 +299,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.minibatch_size = minibatch_size
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
-        """Fit the embedding and store coordinates for the input rows."""
+        """Fit the embedding and store coordinates for the input rows.
+
+        Successful fits expose `graph_construction_time_`,
+        `embedding_optimization_time_`, and total `fit_time_` in seconds.
+        """
+        fit_started = time.perf_counter()
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)
         rank_weight_exponent = _finite_nonnegative(
@@ -341,6 +348,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         compute_device = _resolve_device(self.device, n_samples)
         compute_dtype = torch.float32 if compute_device.type == "mps" else torch.float64
 
+        graph_started = time.perf_counter()
         if self.graph_mode == "exact":
             distances = cdist(X_checked, X_checked, metric="euclidean")
             if not np.isfinite(distances).all():
@@ -353,6 +361,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             self.cluster_centers_ = None
             self.cluster_sample_indices_ = None
             self.coarse_graph_edges_ = None
+            self.n_coarse_msts_ = None
             self.n_unique_local_edges_ = None
             self.n_duplicate_local_edges_ = None
         else:
@@ -373,14 +382,26 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 raise ValueError("Centroid distances overflowed; rescale X before fitting.")
             np.fill_diagonal(coarse_distances, 0.0)
             coarse_edges = _iterated_mst_edges(
-                coarse_distances, n_coarse_msts, rank_weight_exponent
+                coarse_distances,
+                n_coarse_msts,
+                rank_weight_exponent,
+                allow_partial=True,
             )[0]
+            effective_coarse_msts = len(coarse_edges) // (n_clusters - 1)
+            if effective_coarse_msts < n_coarse_msts:
+                warnings.warn(
+                    f"Could construct only {effective_coarse_msts} of the "
+                    f"{n_coarse_msts} requested coarse MSTs; continuing with "
+                    "the maximum feasible number.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
             edges, edge_weights = _hierarchical_imst_edges(
                 X_checked,
                 labels,
                 kmeans.cluster_centers_,
                 n_clusters,
-                n_coarse_msts,
+                effective_coarse_msts,
                 n_local_msts,
                 rank_weight_exponent,
                 self.n_jobs,
@@ -392,9 +413,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 np.flatnonzero(labels == cluster) for cluster in range(n_clusters)
             ]
             self.coarse_graph_edges_ = coarse_edges.copy()
+            self.n_coarse_msts_ = effective_coarse_msts
             self.n_unique_local_edges_ = int(edges.shape[0])
             self.n_duplicate_local_edges_ = None
+        self.graph_construction_time_ = time.perf_counter() - graph_started
 
+        embedding_started = time.perf_counter()
         rng = np.random.RandomState(self.random_state)
         torch_generator = torch.Generator(device="cpu")
         seed = int(rng.randint(0, np.iinfo(np.int32).max))
@@ -493,6 +517,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 with torch.no_grad():
                     coordinates -= coordinates.mean(dim=0, keepdim=True)
 
+        if compute_device.type == "mps":
+            torch.mps.synchronize()
+        self.embedding_optimization_time_ = time.perf_counter() - embedding_started
         self.n_features_in_ = X_checked.shape[1]
         self.device_ = str(compute_device)
         if hasattr(X, "columns") and all(isinstance(c, str) for c in X.columns):
@@ -503,6 +530,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.embedding_ = coordinates.detach().cpu().numpy().copy()
         self.graph_edges_ = edge_array.copy()
         self.graph_weights_ = edge_weights.copy()
+        self.fit_time_ = time.perf_counter() - fit_started
         return self
 
     def transform(self, X: object) -> np.ndarray:
