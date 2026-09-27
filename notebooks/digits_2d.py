@@ -81,7 +81,7 @@ def display_interactive_embedding(
     n_msts = widgets.IntSlider(
         value=8,
         min=1,
-        max=20,
+        max=64,
         step=1,
         description="MSTs",
         continuous_update=False,
@@ -91,7 +91,7 @@ def display_interactive_embedding(
         value=1.0,
         min=0.0,
         max=3.0,
-        step=0.25,
+        step=0.01,
         description="Rank exponent",
         continuous_update=False,
         style={"description_width": "initial"},
@@ -99,7 +99,7 @@ def display_interactive_embedding(
     n_epochs = widgets.IntSlider(
         value=1000,
         min=10,
-        max=1000,
+        max=2000,
         step=10,
         description="Epochs",
         continuous_update=False,
@@ -128,7 +128,7 @@ def display_interactive_embedding(
     negative_ratio = widgets.IntSlider(
         value=4,
         min=0,
-        max=10,
+        max=30,
         step=1,
         description="Negative ratio",
         continuous_update=False,

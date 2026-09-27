@@ -136,6 +136,7 @@ def run_mnist_parameter_grid(
     data_seed: int = 42,
     model_seed: int = 42,
     n_msts: int = 8,
+    exact_mst_values: Iterable[int] = (2, 3, 4, 8),
     n_epochs: int = 200,
     n_clusters: int = 100,
     minibatch_size: int = 256,
@@ -146,15 +147,16 @@ def run_mnist_parameter_grid(
     dict[str, float | int],
     dict[tuple[int, int], np.ndarray],
     np.ndarray,
-    np.ndarray,
+    dict[int, np.ndarray],
 ]:
     """Compare coarse/local MST settings on a shared stratified MNIST sample."""
     coarse_values = tuple(int(value) for value in coarse_mst_values)
     local_values = tuple(int(value) for value in local_mst_values)
-    if not coarse_values or not local_values:
-        raise ValueError("Provide at least one coarse and one local MST value.")
-    if min(coarse_values) < 1 or min(local_values) < 1:
-        raise ValueError("Coarse and local MST values must be positive integers.")
+    exact_values = tuple(int(value) for value in exact_mst_values)
+    if not coarse_values or not local_values or not exact_values:
+        raise ValueError("Provide at least one exact, coarse, and local MST value.")
+    if min(coarse_values) < 1 or min(local_values) < 1 or min(exact_values) < 1:
+        raise ValueError("Exact, coarse, and local MST values must be positive integers.")
     if max_samples < 10:
         raise ValueError("max_samples must be at least 10.")
 
@@ -216,6 +218,21 @@ def run_mnist_parameter_grid(
     exact_edges, exact_timings = _validate_fitted_model(exact, len(X))
     exact_scores = score_embedding(exact.embedding_)
     exact_embedding = exact.embedding_.copy()
+    exact_embeddings: dict[int, np.ndarray] = {}
+    for exact_n_msts in exact_values:
+        if exact_n_msts == n_msts:
+            exact_embeddings[exact_n_msts] = exact_embedding
+            continue
+        exact_model = IteratedMinimumSpanningTreeEmbedder(
+            graph_mode="exact",
+            n_msts=exact_n_msts,
+            n_epochs=n_epochs,
+            batch_size=4096,
+            random_state=model_seed,
+            device=device,
+        )
+        exact_model.fit(X)
+        exact_embeddings[exact_n_msts] = exact_model.embedding_.copy()
     embeddings: dict[tuple[int, int], np.ndarray] = {}
     exact_summary: dict[str, float | int] = {
         "unique_edges": len(exact_edges),
@@ -278,72 +295,63 @@ def run_mnist_parameter_grid(
                     "wall_time_seconds": wall_time,
                 }
             )
-    return pd.DataFrame(rows), exact_summary, embeddings, y, exact_embedding
+    return pd.DataFrame(rows), exact_summary, embeddings, y, exact_embeddings
 
 
 def plot_mnist_embedding_grid(
     embeddings: Mapping[tuple[int, int], np.ndarray],
     labels: np.ndarray,
-    exact_embedding: np.ndarray,
+    exact_embeddings: Mapping[int, np.ndarray],
     *,
     coarse_mst_values: Iterable[int],
     local_mst_values: Iterable[int],
-    n_msts: int,
 ):
-    """Plot an exact reference above the coarse/local MST embedding grid."""
+    """Plot exact MST iteration embeddings above the coarse/local grid."""
     import matplotlib.pyplot as plt
 
+    exact_values = tuple(sorted(int(value) for value in exact_embeddings))
     coarse_values = tuple(sorted(int(value) for value in coarse_mst_values))
     local_values = tuple(sorted(int(value) for value in local_mst_values))
+    n_columns = max(len(exact_values), len(local_values))
+    n_rows = len(coarse_values) + 1
     fig = plt.figure(
-        figsize=(3.2 * len(local_values), 3.0 * (len(coarse_values) + 1)),
+        figsize=(3.2 * n_columns, 3.0 * n_rows),
         constrained_layout=True,
     )
-    layout = fig.add_gridspec(len(coarse_values) + 1, len(local_values))
-    fig.suptitle(f"MNIST 2D embeddings — exact baseline uses {n_msts} MSTs")
+    layout = fig.add_gridspec(n_rows, n_columns)
+    fig.suptitle("MNIST 2D embeddings — exact MST iteration grid and hierarchical grid")
 
-    span = min(2, len(local_values))
-    start = (len(local_values) - span) // 2
-    exact_ax = fig.add_subplot(layout[0, start : start + span])
-    points = exact_ax.scatter(
-        exact_embedding[:, 0],
-        exact_embedding[:, 1],
-        c=labels,
-        cmap="tab10",
-        vmin=-0.5,
-        vmax=9.5,
-        s=2,
-        alpha=0.65,
-        linewidths=0,
-        rasterized=True,
-    )
-    exact_ax.set_title(f"Exact, N_MSTS={n_msts}")
-    exact_ax.set_xticks([])
-    exact_ax.set_yticks([])
-    exact_ax.set_aspect("equal", adjustable="datalim")
+    axes = []
+    points = None
+    for column, n_msts in enumerate(exact_values):
+        ax = fig.add_subplot(layout[0, column])
+        axes.append(ax)
+        embedding = exact_embeddings[n_msts]
+        points = ax.scatter(
+            embedding[:, 0], embedding[:, 1], c=labels, cmap="tab10",
+            vmin=-0.5, vmax=9.5, s=2, alpha=0.65, linewidths=0,
+            rasterized=True,
+        )
+        ax.set_title(f"Exact, N_MSTS={n_msts}")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_aspect("equal", adjustable="datalim")
 
-    axes = [exact_ax]
-    for row, coarse_msts in enumerate(coarse_values):
+    for row, coarse_msts in enumerate(coarse_values, start=1):
         for column, local_msts in enumerate(local_values):
-            ax = fig.add_subplot(layout[row + 1, column])
+            ax = fig.add_subplot(layout[row, column])
             axes.append(ax)
             embedding = embeddings[(coarse_msts, local_msts)]
             points = ax.scatter(
-                embedding[:, 0],
-                embedding[:, 1],
-                c=labels,
-                cmap="tab10",
-                vmin=-0.5,
-                vmax=9.5,
-                s=2,
-                alpha=0.65,
-                linewidths=0,
+                embedding[:, 0], embedding[:, 1], c=labels, cmap="tab10",
+                vmin=-0.5, vmax=9.5, s=2, alpha=0.65, linewidths=0,
                 rasterized=True,
             )
             ax.set_title(f"Coarse={coarse_msts}, local={local_msts}")
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_aspect("equal", adjustable="datalim")
+
     if points is not None:
         colorbar = fig.colorbar(points, ax=axes, ticks=range(10), shrink=0.85)
         colorbar.set_label("MNIST digit")
