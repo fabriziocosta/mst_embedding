@@ -136,6 +136,15 @@ def display_interactive_embedding(
         continuous_update=False,
         style={"description_width": "initial"},
     )
+    repulsion_type = widgets.Dropdown(
+        options=[
+            ("Bernoulli (log)", "bernoulli"),
+            ("Inverse distance (previous)", "inverse_distance"),
+        ],
+        value="bernoulli",
+        description="Repulsion force",
+        style={"description_width": "initial"},
+    )
     negative_ratio = widgets.IntSlider(
         value=4,
         min=0,
@@ -184,6 +193,7 @@ def display_interactive_embedding(
         n_epochs.value = 1000
         learning_rate.value = 0.05
         lambda_rep.value = 0.5
+        repulsion_type.value = "bernoulli"
         negative_ratio.value = 4
         compute_knn.value = False
         device.value = device_default
@@ -207,6 +217,7 @@ def display_interactive_embedding(
                     learning_rate=learning_rate.value,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
+                    repulsion_type=repulsion_type.value,
                     random_state=random_state,
                     device=device.value,
                 )
@@ -277,6 +288,7 @@ def display_interactive_embedding(
         [
             widgets.HBox([sample_count, n_msts, rank_exponent, minkowski_p]),
             widgets.HBox([n_epochs, learning_rate, lambda_rep, negative_ratio]),
+            widgets.HBox([repulsion_type]),
             widgets.HBox([compute_knn, device]),
         ]
     )
@@ -296,6 +308,7 @@ def display_interactive_embedding(
             "n_epochs": n_epochs,
             "learning_rate": learning_rate,
             "lambda_rep": lambda_rep,
+            "repulsion_type": repulsion_type,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
             "device": device,

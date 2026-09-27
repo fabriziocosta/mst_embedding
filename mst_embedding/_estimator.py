@@ -16,7 +16,11 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.utils.validation import check_array, check_is_fitted
 
-from .losses import bernoulli_repulsion_loss, log_attraction_loss
+from .losses import (
+    bernoulli_repulsion_loss,
+    inverse_distance_repulsion_loss,
+    log_attraction_loss,
+)
 
 
 def _positive_integer(name: str, value: object, *, allow_zero: bool = False) -> int:
@@ -271,6 +275,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         epsilon)`` that returns a scalar differentiable PyTorch tensor. The
         default is :func:`mst_embedding.bernoulli_repulsion_loss`, which
         evaluates the negative-pair loss ``-log(1 - q)``.
+    repulsion_type : {'bernoulli', 'inverse_distance'}, default='bernoulli'
+        Built-in negative-pair loss. ``'inverse_distance'`` selects the
+        original ``1 / (1 + squared_distance + epsilon)`` penalty. This is
+        ignored when ``repulsion_loss_fn`` is supplied.
     """
 
     def __init__(
@@ -297,6 +305,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         n_jobs: int = -1,
         minibatch_size: int = 1024,
         minkowski_p: float = 2.0,
+        repulsion_type: str = "bernoulli",
     ) -> None:
         self.n_msts = n_msts
         self.rank_weight_exponent = rank_weight_exponent
@@ -319,6 +328,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.n_jobs = n_jobs
         self.minibatch_size = minibatch_size
         self.minkowski_p = minkowski_p
+        self.repulsion_type = repulsion_type
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -360,17 +370,22 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             raise ValueError("attraction_loss_fn must be callable or None.")
         if self.repulsion_loss_fn is not None and not callable(self.repulsion_loss_fn):
             raise ValueError("repulsion_loss_fn must be callable or None.")
+        if self.repulsion_type not in {"bernoulli", "inverse_distance"}:
+            raise ValueError(
+                "repulsion_type must be 'bernoulli' or 'inverse_distance'."
+            )
         use_default_attraction_loss = self.attraction_loss_fn is None
         attraction_loss_fn = (
             log_attraction_loss
             if use_default_attraction_loss
             else self.attraction_loss_fn
         )
-        repulsion_loss_fn = (
-            bernoulli_repulsion_loss
-            if self.repulsion_loss_fn is None
-            else self.repulsion_loss_fn
-        )
+        if self.repulsion_loss_fn is not None:
+            repulsion_loss_fn = self.repulsion_loss_fn
+        elif self.repulsion_type == "inverse_distance":
+            repulsion_loss_fn = inverse_distance_repulsion_loss
+        else:
+            repulsion_loss_fn = bernoulli_repulsion_loss
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
         n_samples = X_checked.shape[0]
         if n_samples < 2:

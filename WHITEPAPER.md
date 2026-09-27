@@ -163,19 +163,30 @@ $$
 d_{uv}^2=\left(\sum_{k=1}^{q}|y_{uk}-y_{vk}|^m\right)^{2/m}.
 $$
 
-For each sampled negative pair, the Bernoulli negative log-likelihood is:
+For each sampled negative pair, the default Bernoulli negative log-likelihood
+is:
 
 $$
 L_{uv}^{-}=-\log(1-q_{uv})
 =\log\!\left(1+\frac{1}{d_{uv}^2+\epsilon}\right).
 $$
 
-The repulsive term is the unweighted mean of these losses over the sampled set
-of negative pairs. The MST-rank weights are not applied to negative samples.
-The positive constant epsilon keeps both q and 1-q strictly positive. Because
-optimization minimizes this term, nearby negative pairs incur a larger cost
-and are pushed apart. If a graph has no eligible negative pairs, the
-repulsive term is set to zero for that step.
+Alternatively, `repulsion_type="inverse_distance"` selects the original
+penalty:
+
+$$
+L_{uv}^{-}=\frac{1}{1+d_{uv}^2+\epsilon}.
+$$
+
+This inverse-distance penalty gives a shallower response to close negatives
+than the Bernoulli log loss. The default is `repulsion_type="bernoulli"`.
+Either way, the repulsive term is the unweighted mean of losses over the
+sampled set of negative pairs. The MST-rank weights are not applied to
+negative samples.
+For the Bernoulli choice, positive epsilon keeps both q and 1-q strictly
+positive. Under either choice, nearby negative pairs incur a larger cost and
+are pushed apart. If a graph has no eligible negative pairs, the repulsive
+term is set to zero for that step.
 
 The combined minibatch objective is
 
@@ -192,14 +203,15 @@ Under `"weight_sum"`, it rescales positive edge weights to estimate the
 objective normalized by their graph-wide sum; the negative term remains
 unchanged.
 
-Both loss functions are modular. The estimator accepts an optional
+The losses are modular. The estimator accepts an optional
 `attraction_loss_fn` callable that receives positive squared distances and edge
 weights (scaled according to `attraction_normalization`), and an optional
 `repulsion_loss_fn` callable that receives negative squared distances and
-epsilon. Each callable must return a scalar
-differentiable PyTorch tensor. If either hook is omitted, its built-in default
-is used. The estimator optimizes the sample coordinates; custom loss functions
-are not themselves trained.
+epsilon. Each callable must return a scalar differentiable PyTorch tensor. If
+either hook is omitted, its built-in default is used. `repulsion_type` selects
+between the built-in negative-pair losses unless `repulsion_loss_fn` overrides
+it. The estimator optimizes the sample coordinates; custom loss functions are
+not themselves trained.
 
 ## 5. Optimization procedure
 
@@ -223,6 +235,7 @@ The default estimator settings are:
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 4 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
+| `repulsion_type` | `bernoulli` | Negative-pair penalty: Bernoulli log or original inverse distance |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
 | `device` | `auto` | CPU or Apple MPS optimization backend |

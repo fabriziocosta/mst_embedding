@@ -68,9 +68,11 @@ the pairwise edge probability
 `q(t) = 1 / (1 + t + epsilon)`. A positive graph edge uses the Bernoulli
 negative log-likelihood `-log(q) = log(1 + t + epsilon)`, multiplied by its
 MST-rank weight. For each positive-edge endpoint, the optimizer samples
-`negative_ratio` graph non-neighbors and applies `-log(1 - q)`, equivalently
-`log(1 + 1 / (t + epsilon))`. Negative losses are averaged without MST-rank
-weights. Adam minimizes the convex combination
+`negative_ratio` graph non-neighbors and applies the selected repulsion loss.
+The default `repulsion_type="bernoulli"` uses `-log(1 - q)`, equivalently
+`log(1 + 1 / (t + epsilon))`. Set `repulsion_type="inverse_distance"` to
+restore the earlier `1 / (1 + t + epsilon)` penalty. Negative losses are
+averaged without MST-rank weights. Adam minimizes the convex combination
 `(1 - lambda_rep) * attraction + lambda_rep * repulsion`. Here `lambda_rep` is
 the repulsion share in `[0, 1]`;
 the attraction share is `1 - lambda_rep`. The default `0.5` gives equal weight
@@ -114,11 +116,13 @@ embedding = image_pipeline.fit_transform(X)
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
 2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)
-uses sliders for sample size, Minkowski order, and estimator settings, with
-`n_components=3` and Plotly controls to rotate the learned embedding.
+uses sliders for sample size, Minkowski order, and estimator settings, plus a
+dropdown for Bernoulli or inverse-distance repulsion, with `n_components=3`
+and Plotly controls to rotate the learned embedding.
 The [interactive 2D notebook](notebooks/digits_2d_interactive.ipynb) adds
-sliders for sample count, Minkowski order, and embedding parameters; it
-requires the notebook extras, including `ipywidgets`.
+sliders for sample count, Minkowski order, and embedding parameters, plus a
+dropdown for Bernoulli or the earlier inverse-distance repulsion; it requires
+the notebook extras, including `ipywidgets`.
 The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
 runs and plots 2D IMSTE embeddings across several image datasets.
 The [hierarchical quality notebook](notebooks/hierarchical_quality.ipynb)
@@ -218,5 +222,6 @@ embedding = IteratedMinimumSpanningTreeEmbedder(
 ).fit_transform(X)
 ```
 
-The built-in `log_attraction_loss` and `bernoulli_repulsion_loss`
-functions are exported from `mst_embedding` for reuse or comparison.
+The built-in `log_attraction_loss`, `bernoulli_repulsion_loss`, and
+`inverse_distance_repulsion_loss` functions are exported from `mst_embedding`
+for reuse or comparison.
