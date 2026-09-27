@@ -37,7 +37,6 @@ def fit_and_plot_mst_3d(
     device="auto",
     trustworthiness_neighbors=10,
     rank_weight_exponent=1.0,
-    minkowski_p=2.0,
     repulsion_type="bernoulli",
 ):
     """Fit one 3D IMSTE embedding and return its scores and Plotly figure."""
@@ -51,7 +50,6 @@ def fit_and_plot_mst_3d(
     estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=n_msts,
         rank_weight_exponent=rank_weight_exponent,
-        minkowski_p=minkowski_p,
         repulsion_type=repulsion_type,
         n_components=3,
         n_epochs=n_epochs,
@@ -135,7 +133,6 @@ def fit_and_plot_mst_3d(
     )
     summary = pd.DataFrame([{
         "n_msts": n_msts,
-        "minkowski_p": minkowski_p,
         "n_components": 3,
         "trustworthiness": score,
         "5-NN 5-fold CV accuracy": knn_accuracy,
@@ -204,12 +201,6 @@ def display_interactive_mst_3d(
     rank_exponent = widgets.FloatSlider(
         value=1.0, min=0.0, max=3.0, step=0.25,
         description="Rank exponent", continuous_update=False,
-        style={"description_width": "initial"},
-    )
-    minkowski_p = widgets.FloatSlider(
-        value=2.0, min=1.0, max=4.0, step=0.1,
-        readout_format=".1f", description="Minkowski p",
-        continuous_update=False,
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
@@ -293,7 +284,6 @@ def display_interactive_mst_3d(
         sample_count.value = min(1000, max_instances)
         n_msts.value = 10
         rank_exponent.value = 1.0
-        minkowski_p.value = 2.0
         n_epochs.value = 1000
         batch_size.value = 4096
         learning_rate.value = 0.05
@@ -319,7 +309,6 @@ def display_interactive_mst_3d(
                     labels,
                     n_msts=n_msts.value,
                     rank_weight_exponent=rank_exponent.value,
-                    minkowski_p=minkowski_p.value,
                     n_epochs=n_epochs.value,
                     batch_size=batch_size.value,
                     learning_rate=learning_rate.value,
@@ -344,7 +333,7 @@ def display_interactive_mst_3d(
     reset_button.on_click(reset_sliders)
     controls = widgets.VBox(
         [
-            widgets.HBox([sample_count, n_msts, rank_exponent, minkowski_p]),
+            widgets.HBox([sample_count, n_msts, rank_exponent]),
             widgets.HBox([n_epochs, batch_size, learning_rate]),
             widgets.HBox([negative_ratio, lambda_rep, epsilon]),
             widgets.HBox([repulsion_type]),
@@ -362,7 +351,6 @@ def display_interactive_mst_3d(
             "sample_count": sample_count,
             "n_msts": n_msts,
             "rank_weight_exponent": rank_exponent,
-            "minkowski_p": minkowski_p,
             "n_epochs": n_epochs,
             "batch_size": batch_size,
             "learning_rate": learning_rate,

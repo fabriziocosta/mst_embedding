@@ -185,15 +185,8 @@ def run_high_dim_mst_gallery(
     batch_size: int = 4096,
     negative_ratio: int = 5,
     rank_weight_exponent: float = 1.0,
-    minkowski_p: float = 2.0,
     lambda_rep: float = 0.5,
     repulsion_type: str = "bernoulli",
-    graph_mode: str = "exact",
-    n_clusters: int = 100,
-    n_coarse_msts: int = 4,
-    n_local_msts: int = 8,
-    n_jobs: int = -1,
-    minibatch_size: int = 1024,
     sample_plot_rows: int = 2,
     random_state: int = 42,
     device: str | None = None,
@@ -253,16 +246,9 @@ def run_high_dim_mst_gallery(
                     negative_ratio=negative_ratio,
                     lambda_rep=lambda_rep,
                     rank_weight_exponent=rank_weight_exponent,
-                    minkowski_p=minkowski_p,
                     repulsion_type=repulsion_type,
                     random_state=random_state,
                     device=resolved_device,
-                    graph_mode=graph_mode,
-                    n_clusters=n_clusters,
-                    n_coarse_msts=n_coarse_msts,
-                    n_local_msts=n_local_msts,
-                    n_jobs=n_jobs,
-                    minibatch_size=minibatch_size,
                 ),
             )
         )
@@ -272,12 +258,7 @@ def run_high_dim_mst_gallery(
         elapsed = time.perf_counter() - started
         print(f"  pipeline completed in {elapsed:.2f} seconds", flush=True)
         estimator = pipeline.named_steps["imste"]
-        effective_coarse_msts = estimator.n_coarse_msts_
-        mst_summary = (
-            f"{n_local_msts} local / {effective_coarse_msts} coarse MSTs"
-            if graph_mode == "hierarchical"
-            else f"{n_msts} MSTs"
-        )
+        mst_summary = f"{n_msts} MSTs"
         if use_patch_preprocessor:
             projection = pipeline.named_steps["patch_projection"]
             feature_count = projection.n_features_out_
@@ -327,19 +308,10 @@ def run_high_dim_mst_gallery(
                 "preprocessed_features": feature_count,
                 **patch_summary,
                 "classes": len(np.unique(labels)),
-                "n_msts": n_msts if graph_mode == "exact" else None,
-                "graph_mode": graph_mode,
-                "n_clusters": n_clusters if graph_mode == "hierarchical" else None,
-                "n_coarse_msts": effective_coarse_msts,
-                "requested_n_coarse_msts": (
-                    n_coarse_msts if graph_mode == "hierarchical" else None
-                ),
-                "n_local_msts": n_local_msts if graph_mode == "hierarchical" else None,
-                "minibatch_size": minibatch_size if graph_mode == "hierarchical" else None,
+                "n_msts": n_msts,
                 "n_epochs": n_epochs,
                 "negative_ratio": negative_ratio,
                 "rank_weight_exponent": rank_weight_exponent,
-                "minkowski_p": minkowski_p,
                 "lambda_rep": lambda_rep,
                 "repulsion_type": repulsion_type,
                 "unique_graph_edges": len(estimator.graph_edges_),
@@ -361,7 +333,7 @@ def run_high_dim_mst_gallery(
         ax.set_title(
             f"{name} — {len(X):,} samples × "
             f"{feature_count:,} features passed to IMSTE; "
-            f"{graph_mode} graph; {mst_summary}; "
+            f"exact Euclidean graph; {mst_summary}; "
             f"{n_epochs} epochs; {elapsed:.2f} s"
         )
         ax.set_xlabel("Embedding dimension 1")

@@ -13,10 +13,9 @@ the influence of each tree. The graph is then embedded by optimizing an
 attractive loss on graph edges together with a sampled repulsive loss on
 non-edges.
 
-The method is deliberately direct. It uses Minkowski distances, a dense MST
-construction, and a small differentiable objective. The configurable order
-defaults to 2, the Euclidean metric. It does not use class labels, a
-nearest-neighbor graph, or an out-of-sample projection. This paper
+The method is deliberately direct. It uses Euclidean distances, a dense MST
+construction, and a small differentiable objective. It does not use class
+labels, a nearest-neighbor graph, or an out-of-sample projection. This paper
 describes the implementation in this repository and its practical limits; it
 makes no claim that the method is a drop-in replacement for established
 embedding methods.
@@ -25,7 +24,7 @@ embedding methods.
 
 An embedding aims to represent relationships among observations with fewer
 coordinates than the original feature space. IMSTE represents those
-relationships through a hierarchy of spanning trees. The first tree connects
+relationships through a sequence of spanning trees. The first tree connects
 each sample to the dataset through the shortest possible total edge length.
 After its edges are removed, the next tree must use different connections.
 Repeating this process exposes additional relationships without choosing a
@@ -54,10 +53,6 @@ $$
 y_i \in \mathbb{R}^q.
 $$
 
-The Minkowski order is denoted by $m$ (the estimator parameter is
-`minkowski_p`), with $m\geq1$. The default $m=2$ is Euclidean distance; $m=1$
-is Manhattan distance.
-
 The number of trees is R. The non-negative exponent that controls how quickly
 later trees lose influence satisfies:
 
@@ -67,11 +62,10 @@ $$
 
 ## 3. Graph construction
 
-The method first computes all pairwise Minkowski distances with order
-`minkowski_p` (denoted by $m$ here to distinguish it from the feature count):
+The method computes all pairwise Euclidean distances:
 
 $$
-D_{ij}=\left(\sum_{k=1}^{p}|x_{ik}-x_{jk}|^m\right)^{1/m},\qquad m\geq 1.
+D_{ij}=\sqrt{\sum_{k=1}^{p}(x_{ik}-x_{jk})^2}.
 $$
 
 For each requested rank, the method finds an MST over the remaining available
@@ -115,11 +109,11 @@ noise. The coordinates are jointly optimized with Adam.
 
 ### 4.1 Attraction on graph edges
 
-For each edge in the graph, the squared Minkowski distance between its
+For each edge in the graph, the squared Euclidean distance between its
 embedded coordinates is:
 
 $$
-d_{ij}^2=\left(\sum_{k=1}^{q}|y_{ik}-y_{jk}|^m\right)^{2/m}.
+d_{ij}^2=\sum_{k=1}^{q}(y_{ik}-y_{jk})^2.
 $$
 
 The default objective interprets embedded distance through a pairwise edge
@@ -221,13 +215,12 @@ negative pairs for eligible sources, computes repulsion, and updates all
 coordinates with Adam. After each update it subtracts the coordinate mean,
 removing global translation drift without changing pairwise differences.
 
-The default estimator settings are:
+The default estimator settings use Euclidean distance for graph construction and embedding.
 
 | Parameter | Default | Role |
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
 | `rank_weight_exponent` | 1.0 | Decay of edge weights by tree rank |
-| `minkowski_p` | 2.0 | Minkowski order for graph and embedding distances |
 | `attraction_normalization` | `mean` | Attraction denominator: edge count or total edge weight |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
@@ -247,7 +240,7 @@ on the CPU in either case.
 
 ## 6. Practical use
 
-Minkowski distance makes feature scale part of the model. Features with larger
+Euclidean distance makes feature scale part of the model. Features with larger
 numeric ranges can dominate graph construction, so inputs should be scaled
 appropriately for the dataset. The gallery standardizes a stratified sample
 before fitting. Labels in that gallery are used only to color plots; they are
@@ -289,42 +282,6 @@ Image borders are zero-padded after normalization as needed to form a regular
 grid.
 
 ## 7. Computational cost
-
-### Hierarchical approximation
-
-The optional `graph_mode="hierarchical"` reduces the regions compared during
-graph construction while leaving the embedding objective unchanged. It runs
-MiniBatchKMeans, constructs the usual IMST over cluster centroids, and for every
-coarse edge `(a, b)` constructs the ordinary IMST on the original samples in
-`C_a ∪ C_b`. These independent local computations run in parallel and are
-mapped back to global sample indices:
-
-```text
-MiniBatchKMeans
-    ↓
-IMST over cluster centroids
-    ↓
-for every centroid edge (a,b):
-    IMST over C_a ∪ C_b
-    ↓
-parallel execution
-    ↓
-set union of global sample edges
-    ↓
-existing IMSTE embedding objective
-```
-
-MiniBatchKMeans still fits Euclidean centroids to form the coarse partitions;
-the selected Minkowski metric is used for centroid MSTs, local sample MSTs,
-and embedding distances. MiniBatchKMeans only restricts which regions are
-compared. All final graph
-edges connect original observations. A sample edge can be found by more than
-one local problem; duplicate discoveries are canonicalized as undirected edges
-and included once, with the strongest (maximum) rank weight. A local problem
-that becomes disconnected contributes the ranks it successfully constructed.
-This approximation can reduce local distance-matrix sizes, though cost depends
-on cluster sizes and the number of coarse edges. The exact graph remains the
-default.
 
 The pairwise distance matrix requires quadratic memory in the number of
 samples:
@@ -380,11 +337,8 @@ optimizing new points; it is not part of this algorithm's current interface.
 
 ## 9. Limitations and interpretation
 
-- In hierarchical mode, MiniBatchKMeans still uses Euclidean centroid fitting
-  to form coarse partitions; Minkowski distance is used for centroid MSTs,
-  local sample MSTs, and embedding distances.
-- The method captures the selected Minkowski structure in the supplied feature space; poor
-  scaling or an unsuitable distance representation can produce a poor graph.
+- Poor feature scaling can cause some dimensions to dominate Euclidean distances
+  and produce a poor graph.
 - Dense pairwise distances limit practical sample counts and require quadratic
   memory.
 - Repeated MSTs may become impossible before the requested rank because
