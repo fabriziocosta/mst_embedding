@@ -3,8 +3,9 @@
 `mst-embedding` provides IMSTE, a scikit-learn-compatible transformer that
 learns an embedding from a union of edge-disjoint minimum spanning trees. It defaults to
 two dimensions and supports other output dimensions through `n_components`.
-It follows the algorithm described in [IDEA.md](IDEA.md).
-For a detailed explanation of the approach, see the [whitepaper](WHITEPAPER.md).
+The method has two stages: it builds a weighted graph from repeated MSTs, then
+optimizes one coordinate vector per input sample. For a detailed explanation,
+see the [whitepaper](WHITEPAPER.md).
 
 ## Install
 
@@ -46,6 +47,31 @@ embedding_3d = IteratedMinimumSpanningTreeEmbedder(
 ).fit_transform(X)
 assert embedding_3d.shape == (len(X), 3)
 ```
+
+## Algorithm
+
+### Build the graph
+
+The exact mode computes pairwise Euclidean distances and repeatedly builds an
+MST, removing each selected edge before constructing the next tree. The union
+contains `n_msts` edge-disjoint trees. An edge first selected at rank `r` gets
+weight `r ** (-rank_weight_exponent)`, so later trees contribute less when the
+default exponent is 1.
+
+### Optimize coordinates
+
+Each observation gets a trainable coordinate vector `y_i` in
+`n_components` dimensions. For a positive graph edge `(i, j)`, the default
+attraction is `w_ij * log(1 + ||y_i - y_j||²)`. For each edge endpoint, the
+optimizer samples `negative_ratio` graph non-neighbors and applies the inverse
+distance penalty `1 / (1 + ||y_i - y_j||² + epsilon)`. It minimizes the sum of
+the mean attraction and `lambda_rep` times the mean repulsion with Adam.
+
+Training shuffles the graph edges each epoch and processes them in batches.
+The random seed controls initialization, edge ordering, and negative sampling.
+Labels are not used during fitting; they can be used afterward to color a
+visualization. `transform` returns the fitted coordinates only for the original
+training matrix because the model does not define an out-of-sample projection.
 
 For flattened images, `ImagePatchRandomProjection` can reduce features after
 normalization while retaining local pixel layout. It splits each image into a

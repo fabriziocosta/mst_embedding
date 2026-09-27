@@ -146,6 +146,7 @@ def run_mnist_parameter_grid(
     dict[str, float | int],
     dict[tuple[int, int], np.ndarray],
     np.ndarray,
+    np.ndarray,
 ]:
     """Compare coarse/local MST settings on a shared stratified MNIST sample."""
     coarse_values = tuple(int(value) for value in coarse_mst_values)
@@ -214,6 +215,7 @@ def run_mnist_parameter_grid(
     exact_wall_time = time.perf_counter() - exact_wall_started
     exact_edges, exact_timings = _validate_fitted_model(exact, len(X))
     exact_scores = score_embedding(exact.embedding_)
+    exact_embedding = exact.embedding_.copy()
     embeddings: dict[tuple[int, int], np.ndarray] = {}
     exact_summary: dict[str, float | int] = {
         "unique_edges": len(exact_edges),
@@ -276,33 +278,55 @@ def run_mnist_parameter_grid(
                     "wall_time_seconds": wall_time,
                 }
             )
-    return pd.DataFrame(rows), exact_summary, embeddings, y
+    return pd.DataFrame(rows), exact_summary, embeddings, y, exact_embedding
 
 
 def plot_mnist_embedding_grid(
     embeddings: Mapping[tuple[int, int], np.ndarray],
     labels: np.ndarray,
+    exact_embedding: np.ndarray,
     *,
     coarse_mst_values: Iterable[int],
     local_mst_values: Iterable[int],
+    n_msts: int,
 ):
-    """Plot one colored 2D embedding per coarse/local MST configuration."""
+    """Plot an exact reference above the coarse/local MST embedding grid."""
     import matplotlib.pyplot as plt
 
     coarse_values = tuple(sorted(int(value) for value in coarse_mst_values))
     local_values = tuple(sorted(int(value) for value in local_mst_values))
-    fig, axes = plt.subplots(
-        len(coarse_values),
-        len(local_values),
-        figsize=(3.2 * len(local_values), 3.0 * len(coarse_values)),
-        squeeze=False,
+    fig = plt.figure(
+        figsize=(3.2 * len(local_values), 3.0 * (len(coarse_values) + 1)),
         constrained_layout=True,
     )
-    fig.suptitle("MNIST 2D embeddings by coarse/local MST settings")
-    points = None
+    layout = fig.add_gridspec(len(coarse_values) + 1, len(local_values))
+    fig.suptitle(f"MNIST 2D embeddings — exact baseline uses {n_msts} MSTs")
+
+    span = min(2, len(local_values))
+    start = (len(local_values) - span) // 2
+    exact_ax = fig.add_subplot(layout[0, start : start + span])
+    points = exact_ax.scatter(
+        exact_embedding[:, 0],
+        exact_embedding[:, 1],
+        c=labels,
+        cmap="tab10",
+        vmin=-0.5,
+        vmax=9.5,
+        s=2,
+        alpha=0.65,
+        linewidths=0,
+        rasterized=True,
+    )
+    exact_ax.set_title(f"Exact, N_MSTS={n_msts}")
+    exact_ax.set_xticks([])
+    exact_ax.set_yticks([])
+    exact_ax.set_aspect("equal", adjustable="datalim")
+
+    axes = [exact_ax]
     for row, coarse_msts in enumerate(coarse_values):
         for column, local_msts in enumerate(local_values):
-            ax = axes[row, column]
+            ax = fig.add_subplot(layout[row + 1, column])
+            axes.append(ax)
             embedding = embeddings[(coarse_msts, local_msts)]
             points = ax.scatter(
                 embedding[:, 0],
@@ -319,8 +343,9 @@ def plot_mnist_embedding_grid(
             ax.set_title(f"Coarse={coarse_msts}, local={local_msts}")
             ax.set_xticks([])
             ax.set_yticks([])
+            ax.set_aspect("equal", adjustable="datalim")
     if points is not None:
-        colorbar = fig.colorbar(points, ax=axes.ravel().tolist(), ticks=range(10), shrink=0.85)
+        colorbar = fig.colorbar(points, ax=axes, ticks=range(10), shrink=0.85)
         colorbar.set_label("MNIST digit")
     plt.close(fig)
     return fig
