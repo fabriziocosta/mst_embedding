@@ -46,8 +46,8 @@ def display_interactive_embedding(
 ) -> dict[str, object]:
     """Load a fixed data pool and display controls for fitting a 2D embedding.
 
-    Sliders configure sample count, MST count, training epochs,
-    learning rate, repulsion, and negative sampling. The embedding is fit only
+    Sliders configure sample count, MST count, repulsion, and negative
+    sampling. Fits use 1,000 epochs and a 0.05 learning rate. The embedding is fit only
     when the user clicks the fit button. Returns widget references for notebook
     customization.
     """
@@ -84,25 +84,6 @@ def display_interactive_embedding(
         max=64,
         step=1,
         description="MSTs",
-        continuous_update=False,
-        style={"description_width": "initial"},
-    )
-    n_epochs = widgets.IntSlider(
-        value=1000,
-        min=10,
-        max=2000,
-        step=10,
-        description="Epochs",
-        continuous_update=False,
-        style={"description_width": "initial"},
-    )
-    learning_rate = widgets.FloatSlider(
-        value=0.05,
-        min=0.01,
-        max=0.10,
-        step=0.01,
-        readout_format=".2f",
-        description="Learning rate",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -168,8 +149,6 @@ def display_interactive_embedding(
     def reset_sliders(_=None) -> None:
         sample_count.value = min(1000, max_instances)
         n_msts.value = 10
-        n_epochs.value = 1000
-        learning_rate.value = 0.05
         lambda_rep.value = 0.5
         repulsion_type.value = "bernoulli"
         negative_ratio.value = 5
@@ -188,9 +167,9 @@ def display_interactive_embedding(
                 estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     n_components=2,
-                    n_epochs=n_epochs.value,
+                    n_epochs=1000,
                     batch_size=8192,
-                    learning_rate=learning_rate.value,
+                    learning_rate=0.05,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
                     repulsion_type=repulsion_type.value,
@@ -230,7 +209,7 @@ def display_interactive_embedding(
                     title=(
                         f"2D IMSTE · {n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
-                        f"{n_epochs.value} epochs{knn_title}"
+                        f"1,000 epochs{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
                     ylabel="Embedding dimension 2",
@@ -263,7 +242,7 @@ def display_interactive_embedding(
     controls = widgets.VBox(
         [
             widgets.HBox([sample_count, n_msts]),
-            widgets.HBox([n_epochs, learning_rate, lambda_rep, negative_ratio]),
+            widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([repulsion_type]),
             widgets.HBox([compute_knn, device]),
         ]
@@ -279,8 +258,6 @@ def display_interactive_embedding(
         "sliders": {
             "sample_count": sample_count,
             "n_msts": n_msts,
-            "n_epochs": n_epochs,
-            "learning_rate": learning_rate,
             "lambda_rep": lambda_rep,
             "repulsion_type": repulsion_type,
             "negative_ratio": negative_ratio,

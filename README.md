@@ -81,35 +81,6 @@ Labels are not used during fitting; they can be used afterward to color a
 visualization. `transform` returns the fitted coordinates only for the original
 training matrix because the model does not define an out-of-sample projection.
 
-For flattened images, `ImagePatchRandomProjection` can reduce features after
-normalization while retaining local pixel layout. It splits each image into a
-2D grid of non-overlapping spatial patches, flattens all channels within each
-patch, applies one shared random projection to every patch, and flattens the
-projected patches for IMSTE. Set `image_shape=(height, width, channels)` for
-channel-last color images; grayscale images can use `(height, width)` or infer
-a square shape. Each projected patch also receives a fixed 2D sinusoidal
-position vector; `position_encoding_size` controls its length and defaults to
-the projected patch size, doubling the combined per-patch feature count. The
-default grid is 5×5 patches and each patch maps to 10 image features plus 10
-position features; incomplete border patches are zero-padded.
-
-```python
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-
-from mst_embedding import (
-    ImagePatchRandomProjection,
-    IteratedMinimumSpanningTreeEmbedder,
-)
-
-image_pipeline = make_pipeline(
-    StandardScaler(),
-    ImagePatchRandomProjection(n_patches=5, n_components=10, random_state=42),
-    IteratedMinimumSpanningTreeEmbedder(random_state=42),
-)
-embedding = image_pipeline.fit_transform(X)
-```
-
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
 2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)

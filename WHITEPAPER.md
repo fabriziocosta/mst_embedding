@@ -252,19 +252,6 @@ scale are not otherwise fixed. Interpret the embedding through relative
 relationships and visual patterns, rather than as a coordinate system with
 absolute units.
 
-For flattened images, the package also provides `ImagePatchRandomProjection`.
-In an sklearn pipeline it can follow `StandardScaler`: it reshapes each row
-into a grayscale image or a channel-last color tensor, tiles non-overlapping
-patches over the two spatial dimensions, projects each flattened patch with
-one shared seeded Gaussian matrix, and flattens the projected patches. Color
-channels stay together within each spatial patch. The default grid contains 5
-rows and 5 columns of patches. Each projected patch is concatenated with a
-fixed 2D sinusoidal position vector whose frequencies vary geometrically.
-`position_encoding_size` controls its length and defaults to the number of
-projected patch features, doubling the concatenated per-patch feature count.
-Image borders are zero-padded after normalization as needed to form a regular
-grid.
-
 ## 7. Computational cost
 
 The pairwise distance matrix requires quadratic memory in the number of
