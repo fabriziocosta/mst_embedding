@@ -16,7 +16,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.utils.validation import check_array, check_is_fitted
 
-from .losses import inverse_distance_repulsion_loss, log_attraction_loss
+from .losses import bernoulli_repulsion_loss, log_attraction_loss
 
 
 def _positive_integer(name: str, value: object, *, allow_zero: bool = False) -> int:
@@ -237,7 +237,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     random_state : int or None, default=42
         Seed controlling initialization, edge shuffling, and negative sampling.
     epsilon : float, default=1e-4
-        Stabilizing constant in the repulsive loss.
+        Smoothing constant in the pairwise edge probability
+        ``q = 1 / (1 + squared_distance + epsilon)``. It keeps probabilities
+        strictly between zero and one for both positive and negative pairs.
     device : {'auto', 'cpu', 'mps'}, default='auto'
         Compute device for embedding optimization. ``auto`` selects Apple's
         Metal Performance Shaders (MPS) backend on macOS for datasets with at
@@ -246,11 +248,13 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     attraction_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(positive_squared_distances,
         edge_weights)`` that returns a scalar differentiable PyTorch tensor.
-        The default is :func:`mst_embedding.log_attraction_loss`.
+        The default is :func:`mst_embedding.log_attraction_loss`, evaluated
+        with the estimator's ``epsilon`` so its positive loss is ``-log(q)``.
     repulsion_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(negative_squared_distances,
         epsilon)`` that returns a scalar differentiable PyTorch tensor. The
-        default is :func:`mst_embedding.inverse_distance_repulsion_loss`.
+        default is :func:`mst_embedding.bernoulli_repulsion_loss`, which
+        evaluates the negative-pair loss ``-log(1 - q)``.
     """
 
     def __init__(
@@ -331,13 +335,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             raise ValueError("attraction_loss_fn must be callable or None.")
         if self.repulsion_loss_fn is not None and not callable(self.repulsion_loss_fn):
             raise ValueError("repulsion_loss_fn must be callable or None.")
+        use_default_attraction_loss = self.attraction_loss_fn is None
         attraction_loss_fn = (
             log_attraction_loss
-            if self.attraction_loss_fn is None
+            if use_default_attraction_loss
             else self.attraction_loss_fn
         )
         repulsion_loss_fn = (
-            inverse_distance_repulsion_loss
+            bernoulli_repulsion_loss
             if self.repulsion_loss_fn is None
             else self.repulsion_loss_fn
         )
@@ -473,9 +478,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
                 positive_d2 = torch.sum(positive_delta * positive_delta, dim=1)
+                if use_default_attraction_loss:
+                    attraction_value = attraction_loss_fn(
+                        positive_d2, weights_t, epsilon
+                    )
+                else:
+                    attraction_value = attraction_loss_fn(positive_d2, weights_t)
                 attraction = _validate_loss_output(
-                    "attraction_loss_fn",
-                    attraction_loss_fn(positive_d2, weights_t),
+                    "attraction_loss_fn", attraction_value
                 )
 
                 # Positive edges are undirected, so both endpoints contribute

@@ -61,11 +61,15 @@ default exponent is 1.
 ### Optimize coordinates
 
 Each observation gets a trainable coordinate vector `y_i` in
-`n_components` dimensions. For a positive graph edge `(i, j)`, the default
-attraction is `w_ij * log(1 + ||y_i - y_j||²)`. For each edge endpoint, the
-optimizer samples `negative_ratio` graph non-neighbors and applies the inverse
-distance penalty `1 / (1 + ||y_i - y_j||² + epsilon)`. It minimizes the sum of
-the mean attraction and `lambda_rep` times the mean repulsion with Adam.
+`n_components` dimensions. For a pair with squared embedding distance
+`t = ||y_i - y_j||²`, define the pairwise edge probability
+`q(t) = 1 / (1 + t + epsilon)`. A positive graph edge uses the Bernoulli
+negative log-likelihood `-log(q) = log(1 + t + epsilon)`, multiplied by its
+MST-rank weight. For each positive-edge endpoint, the optimizer samples
+`negative_ratio` graph non-neighbors and applies `-log(1 - q)`, equivalently
+`log(1 + 1 / (t + epsilon))`. Negative losses are averaged without MST-rank
+weights. Adam minimizes the mean positive loss plus `lambda_rep` times the
+mean negative loss.
 
 Training shuffles the graph edges each epoch and processes them in batches.
 The random seed controls initialization, edge ordering, and negative sampling.
@@ -205,5 +209,5 @@ embedding = IteratedMinimumSpanningTreeEmbedder(
 ).fit_transform(X)
 ```
 
-The built-in `log_attraction_loss` and `inverse_distance_repulsion_loss`
+The built-in `log_attraction_loss` and `bernoulli_repulsion_loss`
 functions are exported from `mst_embedding` for reuse or comparison.

@@ -116,20 +116,29 @@ $$
 d_{ij}^2=\lVert y_i-y_j\rVert_2^2.
 $$
 
+The default objective interprets embedded distance through a pairwise edge
+probability:
+
+$$
+q_{ij}=\frac{1}{1+d_{ij}^2+\epsilon}.
+$$
+
 With the default `attraction_normalization="mean"`, the attractive term is
 
 $$
 L_{\mathrm{attr}}=
 \frac{1}{|E|}\sum_{(i,j)\in E}
-w_{ij}\log(1+d_{ij}^2).
+w_{ij}\bigl[-\log(q_{ij})\bigr]
+=\frac{1}{|E|}\sum_{(i,j)\in E}
+w_{ij}\log(1+d_{ij}^2+\epsilon).
 $$
 
-Minimizing this term brings graph-connected samples together. The logarithm
-keeps the attraction increasing while reducing its growth for already distant
-pairs.
+This is the Bernoulli negative log-likelihood for a positive edge. Minimizing
+it brings graph-connected samples together. The MST-rank weight applies to
+positive edges only.
 
 The optional `attraction_normalization="weight_sum"` variant uses
-`sum(w_ij * log(1 + d_ij^2)) / sum(w_ij)` instead. This keeps the attraction
+`sum(w_ij * log(1 + d_ij^2 + epsilon)) / sum(w_ij)` instead. This keeps the attraction
 scale from falling simply because more, lower-weight MST ranks were added.
 The default remains the original edge-count mean so the variant can be
 compared without changing baseline behavior. With minibatch optimization, the
@@ -148,19 +157,19 @@ $$
 d_{uv}^2=\lVert y_u-y_v\rVert_2^2.
 $$
 
-The repulsive contribution is:
+For each sampled negative pair, the Bernoulli negative log-likelihood is:
 
 $$
-L_{\mathrm{rep}}=
-\frac{1}{|S|}\sum_{(u,v)\in S}
-\frac{1}{1+d_{uv}^2+\epsilon},
+L_{uv}^{-}=-\log(1-q_{uv})
+=\log\!\left(1+\frac{1}{d_{uv}^2+\epsilon}\right).
 $$
 
-Here, S is the sampled set of negative pairs and epsilon is a small
-positive constant that prevents division by zero. Because optimization
-minimizes this term, nearby negative pairs incur a larger cost and are pushed
-apart. If a graph has no eligible negative pairs, the repulsive term is set to
-zero for that step.
+The repulsive term is the unweighted mean of these losses over the sampled set
+of negative pairs. The MST-rank weights are not applied to negative samples.
+The positive constant epsilon keeps both q and 1-q strictly positive. Because
+optimization minimizes this term, nearby negative pairs incur a larger cost
+and are pushed apart. If a graph has no eligible negative pairs, the
+repulsive term is set to zero for that step.
 
 The combined minibatch objective is
 
@@ -205,7 +214,7 @@ The default estimator settings are:
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 4 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 1.0 | Repulsion coefficient |
-| `epsilon` | `1e-4` | Repulsion stabilizer |
+| `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
 | `device` | `auto` | CPU or Apple MPS optimization backend |
 
@@ -356,7 +365,7 @@ optimizing new points; it is not part of this algorithm's current interface.
   reproducibility but does not establish that a result is unique or globally
   optimal.
 - The repulsive term samples graph non-neighbors rather than modeling all
-  non-edge pairs exactly.
+  non-edge pairs exactly; the sampled negative losses are unweighted.
 - Output distances and axis values are not calibrated quantities. Rotation,
   reflection, and overall scale do not carry intrinsic meaning.
 - The estimator has no out-of-sample projection and does not use labels during
