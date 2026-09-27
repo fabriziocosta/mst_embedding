@@ -16,15 +16,22 @@ from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 from mst_embedding._estimator import _hierarchical_imst_edges, _iterated_mst_edges
 
 MINIBATCH_SIZE = 256
+MINKOWSKI_P = 2.0
 
 
 def main():
     digits = load_digits()
     X = StandardScaler().fit_transform(digits.data[:600])
-    common = dict(n_msts=3, n_epochs=150, batch_size=1024, random_state=42)
+    common = dict(
+        n_msts=3,
+        n_epochs=150,
+        batch_size=1024,
+        random_state=42,
+        minkowski_p=MINKOWSKI_P,
+    )
 
     start = perf_counter()
-    exact_distances = cdist(X, X)
+    exact_distances = cdist(X, X, metric="minkowski", p=MINKOWSKI_P)
     exact_edges, _ = _iterated_mst_edges(exact_distances, common["n_msts"])
     exact_graph_seconds = perf_counter() - start
     exact_start = perf_counter()
@@ -49,6 +56,7 @@ def main():
             n_local_msts=3,
             rank_weight_exponent=1.0,
             n_jobs=-1,
+            minkowski_p=MINKOWSKI_P,
         )
         graph_seconds = perf_counter() - start
         model_start = perf_counter()

@@ -142,6 +142,7 @@ def run_mnist_parameter_grid(
     minibatch_size: int = 256,
     n_jobs: int = -1,
     device: str = "cpu",
+    minkowski_p: float = 2.0,
 ) -> tuple[
     pd.DataFrame,
     dict[str, float | int],
@@ -190,6 +191,7 @@ def run_mnist_parameter_grid(
         "batch_size": 4096,
         "random_state": model_seed,
         "device": device,
+        "minkowski_p": minkowski_p,
     }
     IteratedMinimumSpanningTreeEmbedder(
         graph_mode="exact", n_msts=n_msts, **warmup_common
@@ -211,6 +213,7 @@ def run_mnist_parameter_grid(
         batch_size=4096,
         random_state=model_seed,
         device=device,
+        minkowski_p=minkowski_p,
     )
     exact_wall_started = time.perf_counter()
     exact.fit(X)
@@ -230,11 +233,13 @@ def run_mnist_parameter_grid(
             batch_size=4096,
             random_state=model_seed,
             device=device,
+            minkowski_p=minkowski_p,
         )
         exact_model.fit(X)
         exact_embeddings[exact_n_msts] = exact_model.embedding_.copy()
     embeddings: dict[tuple[int, int], np.ndarray] = {}
     exact_summary: dict[str, float | int] = {
+        "minkowski_p": minkowski_p,
         "unique_edges": len(exact_edges),
         **exact_scores,
         "graph_construction_seconds": exact_timings["graph_construction_time_"],
@@ -259,6 +264,7 @@ def run_mnist_parameter_grid(
                 batch_size=4096,
                 random_state=model_seed,
                 device=device,
+                minkowski_p=minkowski_p,
             )
             wall_started = time.perf_counter()
             estimator.fit(X)
@@ -269,6 +275,7 @@ def run_mnist_parameter_grid(
             intersection = len(edges & exact_edges)
             rows.append(
                 {
+                    "minkowski_p": minkowski_p,
                     "n_coarse_msts": coarse_msts,
                     "n_local_msts": local_msts,
                     "effective_coarse_msts": estimator.n_coarse_msts_,
@@ -372,6 +379,7 @@ def run_mnist_quality_benchmark(
     minibatch_size: int = 256,
     n_jobs: int = -1,
     device: str = "cpu",
+    minkowski_p: float = 2.0,
 ) -> dict[str, pd.DataFrame]:
     """Load MNIST, run paired exact/hierarchical fits, and summarize results."""
     seeds = tuple(int(seed) for seed in seeds)
@@ -397,6 +405,7 @@ def run_mnist_quality_benchmark(
         "batch_size": 4096,
         "random_state": data_seed,
         "device": device,
+        "minkowski_p": minkowski_p,
     }
     IteratedMinimumSpanningTreeEmbedder(
         graph_mode="exact", n_msts=n_msts, **warmup_common
@@ -432,6 +441,7 @@ def run_mnist_quality_benchmark(
                 batch_size=4096,
                 random_state=seed,
                 device=device,
+                minkowski_p=minkowski_p,
             )
         else:
             if seed not in exact_graphs_by_seed:
@@ -447,6 +457,7 @@ def run_mnist_quality_benchmark(
                 batch_size=4096,
                 random_state=seed,
                 device=device,
+                minkowski_p=minkowski_p,
             )
 
         wall_started = time.perf_counter()
@@ -487,6 +498,7 @@ def run_mnist_quality_benchmark(
 
         return {
             "mode": mode,
+            "minkowski_p": minkowski_p,
             "seed": seed,
             "n_clusters": n_clusters,
             "unique_edges": len(graph_edges),

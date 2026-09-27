@@ -66,6 +66,7 @@ def display_interactive_embedding(
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
         f"Default selection: {initial_sample_count:,} samples, 8 MSTs, "
+        "Minkowski p=2, "
         "1,000 epochs. Click Fit embedding to run."
     )
 
@@ -96,6 +97,16 @@ def display_interactive_embedding(
         continuous_update=False,
         style={"description_width": "initial"},
     )
+    minkowski_p = widgets.FloatSlider(
+        value=2.0,
+        min=1.0,
+        max=4.0,
+        step=0.1,
+        readout_format=".1f",
+        description="Minkowski p",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
     n_epochs = widgets.IntSlider(
         value=1000,
         min=10,
@@ -116,12 +127,12 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     lambda_rep = widgets.FloatSlider(
-        value=1.0,
+        value=0.5,
         min=0.0,
-        max=2.0,
-        step=0.1,
-        readout_format=".1f",
-        description="Repulsion",
+        max=1.0,
+        step=0.05,
+        readout_format=".2f",
+        description="Repulsion share (λ)",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -169,9 +180,10 @@ def display_interactive_embedding(
         sample_count.value = min(1000, max_instances)
         n_msts.value = 8
         rank_exponent.value = 1.0
+        minkowski_p.value = 2.0
         n_epochs.value = 1000
         learning_rate.value = 0.05
-        lambda_rep.value = 1.0
+        lambda_rep.value = 0.5
         negative_ratio.value = 4
         compute_knn.value = False
         device.value = device_default
@@ -188,6 +200,7 @@ def display_interactive_embedding(
                 estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     rank_weight_exponent=rank_exponent.value,
+                    minkowski_p=minkowski_p.value,
                     n_components=2,
                     n_epochs=n_epochs.value,
                     batch_size=8192,
@@ -262,7 +275,7 @@ def display_interactive_embedding(
 
     controls = widgets.VBox(
         [
-            widgets.HBox([sample_count, n_msts, rank_exponent]),
+            widgets.HBox([sample_count, n_msts, rank_exponent, minkowski_p]),
             widgets.HBox([n_epochs, learning_rate, lambda_rep, negative_ratio]),
             widgets.HBox([compute_knn, device]),
         ]
@@ -279,6 +292,7 @@ def display_interactive_embedding(
             "sample_count": sample_count,
             "n_msts": n_msts,
             "rank_weight_exponent": rank_exponent,
+            "minkowski_p": minkowski_p,
             "n_epochs": n_epochs,
             "learning_rate": learning_rate,
             "lambda_rep": lambda_rep,

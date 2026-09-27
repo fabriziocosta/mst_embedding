@@ -52,24 +52,29 @@ assert embedding_3d.shape == (len(X), 3)
 
 ### Build the graph
 
-The exact mode computes pairwise Euclidean distances and repeatedly builds an
-MST, removing each selected edge before constructing the next tree. The union
-contains `n_msts` edge-disjoint trees. An edge first selected at rank `r` gets
-weight `r ** (-rank_weight_exponent)`, so later trees contribute less when the
-default exponent is 1.
+The exact mode computes pairwise Minkowski distances using `minkowski_p` and
+repeatedly builds an MST, removing each selected edge before constructing the
+next tree. The default `minkowski_p=2` is Euclidean distance; `minkowski_p=1`
+is Manhattan distance. The union contains `n_msts` edge-disjoint trees. An edge
+first selected at rank `r` gets weight `r ** (-rank_weight_exponent)`, so later
+trees contribute less when the default exponent is 1.
 
 ### Optimize coordinates
 
 Each observation gets a trainable coordinate vector `y_i` in
-`n_components` dimensions. For a pair with squared embedding distance
-`t = ||y_i - y_j||²`, define the pairwise edge probability
+`n_components` dimensions. For a pair with squared Minkowski embedding
+distance `t = (sum_k |y_ik - y_jk|^minkowski_p) ** (2 / minkowski_p)`, define
+the pairwise edge probability
 `q(t) = 1 / (1 + t + epsilon)`. A positive graph edge uses the Bernoulli
 negative log-likelihood `-log(q) = log(1 + t + epsilon)`, multiplied by its
 MST-rank weight. For each positive-edge endpoint, the optimizer samples
 `negative_ratio` graph non-neighbors and applies `-log(1 - q)`, equivalently
 `log(1 + 1 / (t + epsilon))`. Negative losses are averaged without MST-rank
-weights. Adam minimizes the mean positive loss plus `lambda_rep` times the
-mean negative loss.
+weights. Adam minimizes the convex combination
+`(1 - lambda_rep) * attraction + lambda_rep * repulsion`. Here `lambda_rep` is
+the repulsion share in `[0, 1]`;
+the attraction share is `1 - lambda_rep`. The default `0.5` gives equal weight
+to the two mean losses.
 
 Training shuffles the graph edges each epoch and processes them in batches.
 The random seed controls initialization, edge ordering, and negative sampling.
@@ -109,11 +114,11 @@ embedding = image_pipeline.fit_transform(X)
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
 2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)
-uses sliders for sample size and estimator settings, with `n_components=3`
-and Plotly controls to rotate the learned embedding.
+uses sliders for sample size, Minkowski order, and estimator settings, with
+`n_components=3` and Plotly controls to rotate the learned embedding.
 The [interactive 2D notebook](notebooks/digits_2d_interactive.ipynb) adds
-sliders for sample count and embedding parameters; it requires the notebook
-extras, including `ipywidgets`.
+sliders for sample count, Minkowski order, and embedding parameters; it
+requires the notebook extras, including `ipywidgets`.
 The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
 runs and plots 2D IMSTE embeddings across several image datasets.
 The [hierarchical quality notebook](notebooks/hierarchical_quality.ipynb)
@@ -129,12 +134,13 @@ the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
 The main parameters are `n_msts=8`, `rank_weight_exponent=1.0`,
-`attraction_normalization="mean"`,
+`minkowski_p=2.0`, `attraction_normalization="mean"`,
 `n_components=2`, `n_epochs=1000`, `batch_size=4096`, `learning_rate=0.05`,
-`negative_ratio=4`, `lambda_rep=1.0`, `epsilon=1e-4`, `random_state=42`, and
+`negative_ratio=4`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
 `rank ** (-rank_weight_exponent)`: the default of 1.0 gives inverse-rank
-weighting, while 0 gives equal weights to all ranks. `negative_ratio` samples
+weighting, while 0 gives equal weights to all ranks. `minkowski_p` sets the
+Minkowski metric order and must be at least 1. `negative_ratio` samples
 that many non-neighbors from each endpoint of each positive edge. On macOS,
 `auto` uses PyTorch's MPS
 backend for datasets with at least 2,048 samples; smaller workloads use the CPU
@@ -182,7 +188,10 @@ set union of global sample edges
 existing IMSTE embedding objective
 ```
 
-MiniBatchKMeans only limits which dataset regions are compared. The final graph
+MiniBatchKMeans still uses Euclidean centroid fitting to form coarse
+partitions; `minkowski_p` controls centroid MSTs, local sample MSTs, and
+embedding distances. MiniBatchKMeans limits which dataset regions are
+compared. The final graph
 contains edges between original observations, including intra-cluster edges
 that arise within each cluster-pair union. Local graphs can rediscover the
 same undirected sample edge; the estimator keeps one copy with its strongest

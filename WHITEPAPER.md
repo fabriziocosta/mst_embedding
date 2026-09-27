@@ -13,9 +13,10 @@ the influence of each tree. The graph is then embedded by optimizing an
 attractive loss on graph edges together with a sampled repulsive loss on
 non-edges.
 
-The method is deliberately direct. It uses Euclidean distances, a dense MST
-construction, and a small differentiable objective. It does not use class
-labels, a nearest-neighbor graph, or an out-of-sample projection. This paper
+The method is deliberately direct. It uses Minkowski distances, a dense MST
+construction, and a small differentiable objective. The configurable order
+defaults to 2, the Euclidean metric. It does not use class labels, a
+nearest-neighbor graph, or an out-of-sample projection. This paper
 describes the implementation in this repository and its practical limits; it
 makes no claim that the method is a drop-in replacement for established
 embedding methods.
@@ -53,6 +54,10 @@ $$
 y_i \in \mathbb{R}^q.
 $$
 
+The Minkowski order is denoted by $m$ (the estimator parameter is
+`minkowski_p`), with $m\geq1$. The default $m=2$ is Euclidean distance; $m=1$
+is Manhattan distance.
+
 The number of trees is R. The non-negative exponent that controls how quickly
 later trees lose influence satisfies:
 
@@ -62,10 +67,11 @@ $$
 
 ## 3. Graph construction
 
-The method first computes all pairwise Euclidean distances:
+The method first computes all pairwise Minkowski distances with order
+`minkowski_p` (denoted by $m$ here to distinguish it from the feature count):
 
 $$
-D_{ij}=\lVert x_i-x_j\rVert_2.
+D_{ij}=\left(\sum_{k=1}^{p}|x_{ik}-x_{jk}|^m\right)^{1/m},\qquad m\geq 1.
 $$
 
 For each requested rank, the method finds an MST over the remaining available
@@ -109,11 +115,11 @@ noise. The coordinates are jointly optimized with Adam.
 
 ### 4.1 Attraction on graph edges
 
-For each edge in the graph, the squared distance between its embedded
-coordinates is:
+For each edge in the graph, the squared Minkowski distance between its
+embedded coordinates is:
 
 $$
-d_{ij}^2=\lVert y_i-y_j\rVert_2^2.
+d_{ij}^2=\left(\sum_{k=1}^{q}|y_{ik}-y_{jk}|^m\right)^{2/m}.
 $$
 
 The default objective interprets embedded distance through a pairwise edge
@@ -154,7 +160,7 @@ from nodes that are neither the source nor one of its graph neighbors. The
 squared embedding distance for a sampled pair is:
 
 $$
-d_{uv}^2=\lVert y_u-y_v\rVert_2^2.
+d_{uv}^2=\left(\sum_{k=1}^{q}|y_{uk}-y_{vk}|^m\right)^{2/m}.
 $$
 
 For each sampled negative pair, the Bernoulli negative log-likelihood is:
@@ -174,12 +180,14 @@ repulsive term is set to zero for that step.
 The combined minibatch objective is
 
 $$
-L=L_{\mathrm{attr}}+\lambda_{\mathrm{rep}}L_{\mathrm{rep}},
+L=(1-\lambda)L_{\mathrm{attr}}+\lambda L_{\mathrm{rep}},
 $$
 
-The parameter lambda_rep sets the relative strength of repulsion. With the
-default `attraction_normalization="mean"`, the implementation uses the mean
-of weighted positive-edge losses and the mean of sampled negative losses.
+The parameter `lambda_rep` is the repulsion share $\lambda\in[0,1]$; the
+attraction share is $1-\lambda$. The default $\lambda=0.5$ gives equal
+weight to the two terms. With the default `attraction_normalization="mean"`,
+the implementation uses the mean of weighted positive-edge losses and the
+mean of sampled negative losses.
 Under `"weight_sum"`, it rescales positive edge weights to estimate the
 objective normalized by their graph-wide sum; the negative term remains
 unchanged.
@@ -207,13 +215,14 @@ The default estimator settings are:
 | --- | ---: | --- |
 | `n_msts` | 8 | Number of edge-disjoint MSTs |
 | `rank_weight_exponent` | 1.0 | Decay of edge weights by tree rank |
+| `minkowski_p` | 2.0 | Minkowski order for graph and embedding distances |
 | `attraction_normalization` | `mean` | Attraction denominator: edge count or total edge weight |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 4 | Negative samples per endpoint of each positive edge |
-| `lambda_rep` | 1.0 | Repulsion coefficient |
+| `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
 | `device` | `auto` | CPU or Apple MPS optimization backend |
@@ -225,7 +234,7 @@ on the CPU in either case.
 
 ## 6. Practical use
 
-Euclidean distance makes feature scale part of the model. Features with larger
+Minkowski distance makes feature scale part of the model. Features with larger
 numeric ranges can dominate graph construction, so inputs should be scaled
 appropriately for the dataset. The gallery standardizes a stratified sample
 before fitting. Labels in that gallery are used only to color plots; they are
@@ -292,7 +301,10 @@ set union of global sample edges
 existing IMSTE embedding objective
 ```
 
-MiniBatchKMeans only restricts which regions are compared. All final graph
+MiniBatchKMeans still fits Euclidean centroids to form the coarse partitions;
+the selected Minkowski metric is used for centroid MSTs, local sample MSTs,
+and embedding distances. MiniBatchKMeans only restricts which regions are
+compared. All final graph
 edges connect original observations. A sample edge can be found by more than
 one local problem; duplicate discoveries are canonicalized as undirected edges
 and included once, with the strongest (maximum) rank weight. A local problem
@@ -355,7 +367,10 @@ optimizing new points; it is not part of this algorithm's current interface.
 
 ## 9. Limitations and interpretation
 
-- The method captures Euclidean structure in the supplied feature space; poor
+- In hierarchical mode, MiniBatchKMeans still uses Euclidean centroid fitting
+  to form coarse partitions; Minkowski distance is used for centroid MSTs,
+  local sample MSTs, and embedding distances.
+- The method captures the selected Minkowski structure in the supplied feature space; poor
   scaling or an unsuitable distance representation can produce a poor graph.
 - Dense pairwise distances limit practical sample counts and require quadratic
   memory.

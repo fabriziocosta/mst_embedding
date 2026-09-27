@@ -69,6 +69,13 @@ def _validate_loss_output(name: str, value: object) -> torch.Tensor:
     return value
 
 
+def _squared_minkowski_distance(delta: torch.Tensor, p: float) -> torch.Tensor:
+    """Return squared Minkowski distances for row-wise coordinate differences."""
+    if p == 2.0:
+        return torch.sum(delta * delta, dim=1)
+    return torch.sum(torch.abs(delta).pow(p), dim=1).pow(2.0 / p)
+
+
 def _iterated_mst_edges(
     distances: np.ndarray,
     n_msts: int,
@@ -134,12 +141,13 @@ def _local_cluster_pair_imst(
     sample_indices: np.ndarray,
     n_local_msts: int,
     rank_weight_exponent: float,
+    minkowski_p: float = 2.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build the local IMST on the union of two clusters, in global indices."""
     if sample_indices.size < 2:
         return np.empty((0, 2), dtype=np.intp), np.empty(0, dtype=np.float64)
     local_X = X[sample_indices]
-    distances = cdist(local_X, local_X, metric="euclidean")
+    distances = cdist(local_X, local_X, metric="minkowski", p=minkowski_p)
     if not np.isfinite(distances).all():
         raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
     np.fill_diagonal(distances, 0.0)
@@ -158,12 +166,15 @@ def _hierarchical_imst_edges(
     n_local_msts: int,
     rank_weight_exponent: float,
     n_jobs: int,
+    minkowski_p: float = 2.0,
     coarse_edges: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build centroid IMSTs then union parallel IMSTs over adjacent clusters."""
     members = [np.flatnonzero(cluster_labels == cluster) for cluster in range(n_clusters)]
     if coarse_edges is None:
-        coarse_distances = cdist(cluster_centers, cluster_centers, metric="euclidean")
+        coarse_distances = cdist(
+            cluster_centers, cluster_centers, metric="minkowski", p=minkowski_p
+        )
         np.fill_diagonal(coarse_distances, 0.0)
         coarse_edges, _ = _iterated_mst_edges(
             coarse_distances, n_coarse_msts, rank_weight_exponent
@@ -174,6 +185,7 @@ def _hierarchical_imst_edges(
             np.concatenate((members[a], members[b])),
             n_local_msts,
             rank_weight_exponent,
+            minkowski_p,
         )
         for a, b in coarse_edges
     ]
@@ -207,6 +219,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         first appearing in rank ``r`` receives weight ``r**(-rank_weight_exponent)``.
         Set to 0 for equal weights across ranks; the default of 1 gives the
         original inverse-rank weighting.
+    minkowski_p : float, default=2.0
+        Minkowski order used for pairwise graph distances and embedding-space
+        distances. Must be at least 1; ``2`` is the Euclidean metric.
     attraction_normalization : {'mean', 'weight_sum'}, default='mean'
         Normalize the weighted attraction by the number of graph edges
         ('mean', the original behavior) or by the sum of graph edge weights.
@@ -232,8 +247,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Adam learning rate.
     negative_ratio : int, default=4
         Number of sampled non-neighbors per endpoint of each positive edge.
-    lambda_rep : float, default=1.0
-        Coefficient multiplying the repulsive loss.
+    lambda_rep : float, default=0.5
+        Repulsion share in the convex combination of attraction and repulsion.
+        Must be between zero and one; attraction receives weight ``1-lambda_rep``.
     random_state : int or None, default=42
         Seed controlling initialization, edge shuffling, and negative sampling.
     epsilon : float, default=1e-4
@@ -265,7 +281,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         batch_size: int = 4096,
         learning_rate: float = 0.05,
         negative_ratio: int = 4,
-        lambda_rep: float = 1.0,
+        lambda_rep: float = 0.5,
         random_state: int | None = 42,
         epsilon: float = 1e-4,
         device: str = "auto",
@@ -280,6 +296,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         n_local_msts: int = 8,
         n_jobs: int = -1,
         minibatch_size: int = 1024,
+        minkowski_p: float = 2.0,
     ) -> None:
         self.n_msts = n_msts
         self.rank_weight_exponent = rank_weight_exponent
@@ -301,6 +318,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.n_local_msts = n_local_msts
         self.n_jobs = n_jobs
         self.minibatch_size = minibatch_size
+        self.minkowski_p = minkowski_p
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -314,6 +332,11 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         rank_weight_exponent = _finite_nonnegative(
             "rank_weight_exponent", self.rank_weight_exponent
         )
+        minkowski_p = _finite_nonnegative(
+            "minkowski_p", self.minkowski_p, strictly_positive=True
+        )
+        if minkowski_p < 1.0:
+            raise ValueError("minkowski_p must be greater than or equal to 1.")
         if self.attraction_normalization not in {"mean", "weight_sum"}:
             raise ValueError(
                 "attraction_normalization must be 'mean' or 'weight_sum'."
@@ -328,6 +351,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             "learning_rate", self.learning_rate, strictly_positive=True
         )
         lambda_rep = _finite_nonnegative("lambda_rep", self.lambda_rep)
+        if lambda_rep > 1.0:
+            raise ValueError("lambda_rep must be between 0 and 1 inclusive.")
         epsilon = _finite_nonnegative("epsilon", self.epsilon, strictly_positive=True)
         if self.graph_mode not in {"exact", "hierarchical"}:
             raise ValueError("graph_mode must be 'exact' or 'hierarchical'.")
@@ -355,7 +380,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
         graph_started = time.perf_counter()
         if self.graph_mode == "exact":
-            distances = cdist(X_checked, X_checked, metric="euclidean")
+            distances = cdist(
+                X_checked, X_checked, metric="minkowski", p=minkowski_p
+            )
             if not np.isfinite(distances).all():
                 raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
             np.fill_diagonal(distances, 0.0)
@@ -382,7 +409,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 batch_size=minibatch_size,
             )
             labels = kmeans.fit_predict(X_checked)
-            coarse_distances = cdist(kmeans.cluster_centers_, kmeans.cluster_centers_)
+            coarse_distances = cdist(
+                kmeans.cluster_centers_,
+                kmeans.cluster_centers_,
+                metric="minkowski",
+                p=minkowski_p,
+            )
             if not np.isfinite(coarse_distances).all():
                 raise ValueError("Centroid distances overflowed; rescale X before fitting.")
             np.fill_diagonal(coarse_distances, 0.0)
@@ -410,6 +442,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 n_local_msts,
                 rank_weight_exponent,
                 self.n_jobs,
+                minkowski_p=minkowski_p,
                 coarse_edges=coarse_edges,
             )
             self.cluster_labels_ = labels.copy()
@@ -477,7 +510,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 weights_t = edge_weights_t[batch_t] * attraction_scale
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
-                positive_d2 = torch.sum(positive_delta * positive_delta, dim=1)
+                positive_d2 = _squared_minkowski_distance(
+                    positive_delta, minkowski_p
+                )
                 if use_default_attraction_loss:
                     attraction_value = attraction_loss_fn(
                         positive_d2, weights_t, epsilon
@@ -511,7 +546,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                         negative_targets, dtype=torch.long, device=compute_device
                     )
                     negative_delta = coordinates[ni] - coordinates[nj]
-                    negative_d2 = torch.sum(negative_delta * negative_delta, dim=1)
+                    negative_d2 = _squared_minkowski_distance(
+                        negative_delta, minkowski_p
+                    )
                     repulsion = _validate_loss_output(
                         "repulsion_loss_fn",
                         repulsion_loss_fn(negative_d2, epsilon),
@@ -520,7 +557,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                     # Some small or dense graphs have no eligible negatives.
                     repulsion = coordinates.sum() * 0.0
 
-                loss = attraction + lambda_rep * repulsion
+                loss = (1.0 - lambda_rep) * attraction + lambda_rep * repulsion
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
