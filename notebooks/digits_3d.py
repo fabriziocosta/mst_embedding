@@ -26,11 +26,11 @@ from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 def fit_and_plot_mst_3d(
     X,
     labels,
-    n_msts=8,
+    n_msts=10,
     n_epochs=1000,
     batch_size=4096,
     learning_rate=0.05,
-    negative_ratio=4,
+    negative_ratio=5,
     lambda_rep=0.5,
     epsilon=1e-4,
     random_state=42,
@@ -183,7 +183,7 @@ def display_interactive_mst_3d(
     minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Default selection: {initial_sample_count:,} samples, 8 MSTs, "
+        f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
         "1,000 epochs. Click Fit 3D embedding to run."
     )
 
@@ -197,7 +197,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_msts = widgets.IntSlider(
-        value=8, min=1, max=20, step=1,
+        value=10, min=1, max=20, step=1,
         description="MSTs", continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -229,7 +229,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     negative_ratio = widgets.IntSlider(
-        value=4, min=0, max=10, step=1,
+        value=5, min=0, max=10, step=1,
         description="Negative ratio", continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -291,13 +291,13 @@ def display_interactive_mst_3d(
 
     def reset_sliders(_=None):
         sample_count.value = min(1000, max_instances)
-        n_msts.value = 8
+        n_msts.value = 10
         rank_exponent.value = 1.0
         minkowski_p.value = 2.0
         n_epochs.value = 1000
         batch_size.value = 4096
         learning_rate.value = 0.05
-        negative_ratio.value = 4
+        negative_ratio.value = 5
         lambda_rep.value = 0.5
         repulsion_type.value = "bernoulli"
         epsilon.value = 1e-4

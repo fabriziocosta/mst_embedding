@@ -225,7 +225,7 @@ The default estimator settings are:
 
 | Parameter | Default | Role |
 | --- | ---: | --- |
-| `n_msts` | 8 | Number of edge-disjoint MSTs |
+| `n_msts` | 10 | Number of edge-disjoint MSTs |
 | `rank_weight_exponent` | 1.0 | Decay of edge weights by tree rank |
 | `minkowski_p` | 2.0 | Minkowski order for graph and embedding distances |
 | `attraction_normalization` | `mean` | Attraction denominator: edge count or total edge weight |
@@ -233,7 +233,7 @@ The default estimator settings are:
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |
 | `learning_rate` | 0.05 | Adam learning rate |
-| `negative_ratio` | 4 | Negative samples per endpoint of each positive edge |
+| `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
 | `repulsion_type` | `bernoulli` | Negative-pair penalty: Bernoulli log or original inverse distance |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
@@ -263,7 +263,7 @@ digits = load_digits()
 X = StandardScaler().fit_transform(digits.data)
 
 embedding = IteratedMinimumSpanningTreeEmbedder(
-    n_msts=8,
+    n_msts=10,
     n_components=2,
     random_state=42,
 ).fit_transform(X)

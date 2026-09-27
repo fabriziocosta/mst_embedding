@@ -216,7 +216,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    n_msts : int, default=8
+    n_msts : int, default=10
         Number of edge-disjoint minimum spanning trees to construct.
     rank_weight_exponent : float, default=1.0
         Exponent controlling how edge weights decay with MST rank. An edge
@@ -249,7 +249,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Number of positive edges per optimization step.
     learning_rate : float, default=0.05
         Adam learning rate.
-    negative_ratio : int, default=4
+    negative_ratio : int, default=5
         Number of sampled non-neighbors per endpoint of each positive edge.
     lambda_rep : float, default=0.5
         Repulsion share in the convex combination of attraction and repulsion.
@@ -283,12 +283,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     def __init__(
         self,
-        n_msts: int = 8,
+        n_msts: int = 10,
         n_components: int = 2,
         n_epochs: int = 1000,
         batch_size: int = 4096,
         learning_rate: float = 0.05,
-        negative_ratio: int = 4,
+        negative_ratio: int = 5,
         lambda_rep: float = 0.5,
         random_state: int | None = 42,
         epsilon: float = 1e-4,

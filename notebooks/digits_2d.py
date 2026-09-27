@@ -65,7 +65,7 @@ def display_interactive_embedding(
     minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Default selection: {initial_sample_count:,} samples, 8 MSTs, "
+        f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
         "Minkowski p=2, "
         "1,000 epochs. Click Fit embedding to run."
     )
@@ -80,7 +80,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     n_msts = widgets.IntSlider(
-        value=8,
+        value=10,
         min=1,
         max=64,
         step=1,
@@ -146,7 +146,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     negative_ratio = widgets.IntSlider(
-        value=4,
+        value=5,
         min=0,
         max=30,
         step=1,
@@ -187,14 +187,14 @@ def display_interactive_embedding(
 
     def reset_sliders(_=None) -> None:
         sample_count.value = min(1000, max_instances)
-        n_msts.value = 8
+        n_msts.value = 10
         rank_exponent.value = 1.0
         minkowski_p.value = 2.0
         n_epochs.value = 1000
         learning_rate.value = 0.05
         lambda_rep.value = 0.5
         repulsion_type.value = "bernoulli"
-        negative_ratio.value = 4
+        negative_ratio.value = 5
         compute_knn.value = False
         device.value = device_default
 

@@ -137,10 +137,10 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=8`, `rank_weight_exponent=1.0`,
+The main parameters are `n_msts=10`, `rank_weight_exponent=1.0`,
 `minkowski_p=2.0`, `attraction_normalization="mean"`,
 `n_components=2`, `n_epochs=1000`, `batch_size=4096`, `learning_rate=0.05`,
-`negative_ratio=4`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
+`negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
 `rank ** (-rank_weight_exponent)`: the default of 1.0 gives inverse-rank
 weighting, while 0 gives equal weights to all ranks. `minkowski_p` sets the
