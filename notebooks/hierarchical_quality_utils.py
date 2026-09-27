@@ -128,6 +128,204 @@ def _summarize_runs(runs: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def run_mnist_parameter_grid(
+    *,
+    coarse_mst_values: Iterable[int] = (1, 2, 4),
+    local_mst_values: Iterable[int] = (1, 2, 4),
+    max_samples: int = 8_000,
+    data_seed: int = 42,
+    model_seed: int = 42,
+    n_msts: int = 8,
+    n_epochs: int = 200,
+    n_clusters: int = 100,
+    minibatch_size: int = 256,
+    n_jobs: int = -1,
+    device: str = "cpu",
+) -> tuple[
+    pd.DataFrame,
+    dict[str, float | int],
+    dict[tuple[int, int], np.ndarray],
+    np.ndarray,
+]:
+    """Compare coarse/local MST settings on a shared stratified MNIST sample."""
+    coarse_values = tuple(int(value) for value in coarse_mst_values)
+    local_values = tuple(int(value) for value in local_mst_values)
+    if not coarse_values or not local_values:
+        raise ValueError("Provide at least one coarse and one local MST value.")
+    if min(coarse_values) < 1 or min(local_values) < 1:
+        raise ValueError("Coarse and local MST values must be positive integers.")
+    if max_samples < 10:
+        raise ValueError("max_samples must be at least 10.")
+
+    X, y = _load_mnist(max_samples, data_seed)
+    print(
+        f"Fixed MNIST grid data: {len(X):,} samples × {X.shape[1]} features; "
+        f"coarse values={coarse_values}; local values={local_values}",
+        flush=True,
+    )
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=data_seed)
+
+    def score_embedding(embedding):
+        return {
+            "trustworthiness": float(
+                trustworthiness(X, embedding, n_neighbors=10)
+            ),
+            "5NN_accuracy": float(
+                cross_val_score(
+                    KNeighborsClassifier(n_neighbors=5),
+                    embedding,
+                    y,
+                    cv=cv,
+                    n_jobs=1,
+                ).mean()
+            ),
+        }
+
+    # Exclude one-time torch and process-pool startup from measured fits.
+    warmup_common = {
+        "n_epochs": 2,
+        "batch_size": 4096,
+        "random_state": model_seed,
+        "device": device,
+    }
+    IteratedMinimumSpanningTreeEmbedder(
+        graph_mode="exact", n_msts=n_msts, **warmup_common
+    ).fit(X)
+    IteratedMinimumSpanningTreeEmbedder(
+        graph_mode="hierarchical",
+        n_clusters=n_clusters,
+        n_coarse_msts=coarse_values[0],
+        n_local_msts=local_values[0],
+        n_jobs=n_jobs,
+        minibatch_size=minibatch_size,
+        **warmup_common,
+    ).fit(X)
+
+    exact = IteratedMinimumSpanningTreeEmbedder(
+        graph_mode="exact",
+        n_msts=n_msts,
+        n_epochs=n_epochs,
+        batch_size=4096,
+        random_state=model_seed,
+        device=device,
+    )
+    exact_wall_started = time.perf_counter()
+    exact.fit(X)
+    exact_wall_time = time.perf_counter() - exact_wall_started
+    exact_edges, exact_timings = _validate_fitted_model(exact, len(X))
+    exact_scores = score_embedding(exact.embedding_)
+    embeddings: dict[tuple[int, int], np.ndarray] = {}
+    exact_summary: dict[str, float | int] = {
+        "unique_edges": len(exact_edges),
+        **exact_scores,
+        "graph_construction_seconds": exact_timings["graph_construction_time_"],
+        "embedding_optimization_seconds": exact_timings[
+            "embedding_optimization_time_"
+        ],
+        "fit_time_seconds": exact_timings["fit_time_"],
+        "wall_time_seconds": exact_wall_time,
+    }
+
+    rows = []
+    for coarse_msts in coarse_values:
+        for local_msts in local_values:
+            estimator = IteratedMinimumSpanningTreeEmbedder(
+                graph_mode="hierarchical",
+                n_clusters=n_clusters,
+                n_coarse_msts=coarse_msts,
+                n_local_msts=local_msts,
+                n_jobs=n_jobs,
+                minibatch_size=minibatch_size,
+                n_epochs=n_epochs,
+                batch_size=4096,
+                random_state=model_seed,
+                device=device,
+            )
+            wall_started = time.perf_counter()
+            estimator.fit(X)
+            wall_time = time.perf_counter() - wall_started
+            edges, timings = _validate_fitted_model(estimator, len(X))
+            scores = score_embedding(estimator.embedding_)
+            embeddings[(coarse_msts, local_msts)] = estimator.embedding_.copy()
+            intersection = len(edges & exact_edges)
+            rows.append(
+                {
+                    "n_coarse_msts": coarse_msts,
+                    "n_local_msts": local_msts,
+                    "effective_coarse_msts": estimator.n_coarse_msts_,
+                    "unique_edges": len(edges),
+                    "exact_edge_precision": intersection / max(len(edges), 1),
+                    "exact_edge_recall": intersection / max(len(exact_edges), 1),
+                    **scores,
+                    "delta_trustworthiness": (
+                        scores["trustworthiness"] - exact_scores["trustworthiness"]
+                    ),
+                    "delta_5NN_accuracy": (
+                        scores["5NN_accuracy"] - exact_scores["5NN_accuracy"]
+                    ),
+                    "delta_fit_time_seconds": (
+                        timings["fit_time_"] - exact_timings["fit_time_"]
+                    ),
+                    "graph_construction_seconds": timings[
+                        "graph_construction_time_"
+                    ],
+                    "embedding_optimization_seconds": timings[
+                        "embedding_optimization_time_"
+                    ],
+                    "fit_time_seconds": timings["fit_time_"],
+                    "wall_time_seconds": wall_time,
+                }
+            )
+    return pd.DataFrame(rows), exact_summary, embeddings, y
+
+
+def plot_mnist_embedding_grid(
+    embeddings: Mapping[tuple[int, int], np.ndarray],
+    labels: np.ndarray,
+    *,
+    coarse_mst_values: Iterable[int],
+    local_mst_values: Iterable[int],
+):
+    """Plot one colored 2D embedding per coarse/local MST configuration."""
+    import matplotlib.pyplot as plt
+
+    coarse_values = tuple(sorted(int(value) for value in coarse_mst_values))
+    local_values = tuple(sorted(int(value) for value in local_mst_values))
+    fig, axes = plt.subplots(
+        len(coarse_values),
+        len(local_values),
+        figsize=(3.2 * len(local_values), 3.0 * len(coarse_values)),
+        squeeze=False,
+        constrained_layout=True,
+    )
+    fig.suptitle("MNIST 2D embeddings by coarse/local MST settings")
+    points = None
+    for row, coarse_msts in enumerate(coarse_values):
+        for column, local_msts in enumerate(local_values):
+            ax = axes[row, column]
+            embedding = embeddings[(coarse_msts, local_msts)]
+            points = ax.scatter(
+                embedding[:, 0],
+                embedding[:, 1],
+                c=labels,
+                cmap="tab10",
+                vmin=-0.5,
+                vmax=9.5,
+                s=2,
+                alpha=0.65,
+                linewidths=0,
+                rasterized=True,
+            )
+            ax.set_title(f"Coarse={coarse_msts}, local={local_msts}")
+            ax.set_xticks([])
+            ax.set_yticks([])
+    if points is not None:
+        colorbar = fig.colorbar(points, ax=axes.ravel().tolist(), ticks=range(10), shrink=0.85)
+        colorbar.set_label("MNIST digit")
+    plt.close(fig)
+    return fig
+
+
 def run_mnist_quality_benchmark(
     *,
     seeds: Iterable[int],

@@ -89,6 +89,9 @@ runs and plots 2D IMSTE embeddings across several image datasets.
 The [hierarchical quality notebook](notebooks/hierarchical_quality.ipynb)
 compares edge recovery, trustworthiness, 5-NN accuracy, runtime, and plots
 against exact IMSTE across several cluster counts.
+The [MNIST coarse/local MST grid notebook](notebooks/mnist_mst_grid.ipynb)
+plots 2D embeddings in a grid of `N_COARSE_MSTS` and `N_LOCAL_MSTS` values on
+8,000 real MNIST instances, colored by digit class.
 
 The estimator exposes `fit`, `fit_transform`, and `transform`. Since the
 coordinates are optimized jointly for all training samples, `transform` returns
