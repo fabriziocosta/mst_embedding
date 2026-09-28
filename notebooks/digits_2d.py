@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from IPython.display import HTML, clear_output, display
 from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts this directory directly on sys.path.
@@ -88,6 +88,11 @@ def display_interactive_embedding(
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
+    if max_instances > 35_000:
+        raise ValueError(
+            "max_instances must be at most 35,000 to reserve an equally sized "
+            "novel batch from the 70,000-row dataset pools."
+        )
     if initial_sample_count < 500:
         raise ValueError("initial_sample_count must be at least 500.")
     initial_sample_count = min(initial_sample_count, max_instances)
@@ -104,15 +109,19 @@ def display_interactive_embedding(
     )
     status = widgets.HTML(value="Loading stratified MNIST sample pool...")
     display(status)
-    max_pool_instances = max_instances
-    X_pool, labels_pool = _load_balanced_pool("mnist", max_instances, random_state)
+    max_training_instances = max_instances
+    max_pool_instances = 2 * max_training_instances
+    X_pool, labels_pool = _load_balanced_pool(
+        "mnist", max_pool_instances, random_state
+    )
     pool_cache = {"mnist": (X_pool, labels_pool)}
     active_dataset = {"name": "mnist"}
-    max_instances = len(X_pool)
-    initial_sample_count = min(initial_sample_count, max_instances)
-    minimum_sample_count = min(500, max_instances)
+    max_training_instances = min(max_training_instances, len(X_pool) // 2)
+    initial_sample_count = min(initial_sample_count, max_training_instances)
+    minimum_sample_count = min(500, max_training_instances)
     status.value = (
-        f"{DATASET_LABELS['mnist']} pool available: {max_instances:,} samples. "
+        f"{DATASET_LABELS['mnist']} pool available: {len(X_pool):,} samples "
+        f"({max_training_instances:,} training plus an equally sized novel pool). "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
         "squared distance, log attraction, Bernoulli repulsion, "
         "weight_sum normalization, 1,000 epochs. "
@@ -122,7 +131,7 @@ def display_interactive_embedding(
     sample_count = widgets.IntSlider(
         value=initial_sample_count,
         min=minimum_sample_count,
-        max=max_instances,
+        max=max_training_instances,
         step=250,
         description="Instances",
         continuous_update=False,
@@ -200,6 +209,58 @@ def display_interactive_embedding(
         description="Estimate 5-fold 5-NN accuracy",
         indent=False,
     )
+    filter_2d_knn = widgets.Checkbox(
+        value=False,
+        description="Highlight same-class neighbors",
+        tooltip=(
+            "Points whose selected number of nearest neighbors in the 2D "
+            "embedding do not all share their class label appear in light "
+            "gray underneath the highlighted points."
+        ),
+        indent=False,
+    )
+    filter_n_neighbors = widgets.IntSlider(
+        value=5,
+        min=1,
+        max=20,
+        step=1,
+        description="Filter neighbors",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    transform_method = widgets.Dropdown(
+        options=[("Direct (training rows only)", "direct"), ("ResNet", "resnet")],
+        value="direct",
+        description="Transform",
+        style={"description_width": "initial"},
+    )
+    resnet_n_layers = widgets.IntSlider(
+        value=3,
+        min=1,
+        max=10,
+        step=1,
+        description="ResNet layers",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    resnet_layer_size = widgets.IntSlider(
+        value=256,
+        min=32,
+        max=512,
+        step=32,
+        description="ResNet width",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    resnet_dropout = widgets.FloatSlider(
+        value=0.1,
+        min=0.0,
+        max=0.5,
+        step=0.05,
+        description="ResNet dropout",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
     mps_backend = getattr(torch.backends, "mps", None)
     mps_available = bool(
         sys.platform == "darwin"
@@ -224,12 +285,105 @@ def display_interactive_embedding(
         tooltip="Restore default values",
         icon="undo",
     )
+    resnet_button = widgets.Button(
+        description="Show ResNet predictions",
+        tooltip="Compare optimized coordinates with the fitted network's predictions.",
+        icon="eye",
+        disabled=True,
+    )
     output = widgets.Output()
+    projection_output = widgets.Output()
+    current_fit: dict[str, object] = {}
+
+    def show_resnet_predictions(_=None) -> None:
+        fitted = current_fit
+        if not fitted:
+            return
+        with projection_output:
+            clear_output(wait=True)
+            estimator = fitted["estimator"]
+            X = fitted["X"]
+            labels = fitted["labels"]
+            novel_X = fitted["novel_X"]
+            novel_labels = fitted["novel_labels"]
+            embedding = fitted["embedding"]
+            predicted = estimator.transform_with_resnet(novel_X)
+
+            fig, axes = plt.subplots(
+                1, 2, figsize=(13, 5.5), sharex=True, sharey=True,
+                constrained_layout=True,
+            )
+            for ax, coordinates, title in zip(
+                axes,
+                (embedding, predicted),
+                ("Optimized training embedding", "ResNet predictions (novel rows)"),
+            ):
+                if ax is axes[1]:
+                    ax.scatter(
+                        embedding[:, 0],
+                        embedding[:, 1],
+                        c="lightgray",
+                        s=8,
+                        alpha=0.35,
+                        linewidths=0,
+                        zorder=1,
+                    )
+                points = ax.scatter(
+                    coordinates[:, 0],
+                    coordinates[:, 1],
+                    c=labels if ax is axes[0] else novel_labels,
+                    cmap="tab10",
+                    vmin=-0.5,
+                    vmax=9.5,
+                    s=10,
+                    alpha=0.8,
+                    linewidths=0,
+                    zorder=2,
+                )
+                ax.set(title=title, xlabel="Embedding dimension 1")
+                ax.set_aspect("equal", adjustable="box")
+            axes[0].set_ylabel("Embedding dimension 2")
+            combined = np.vstack((embedding, predicted))
+            x_margin = max(np.ptp(combined[:, 0]) * 0.03, 0.1)
+            y_margin = max(np.ptp(combined[:, 1]) * 0.03, 0.1)
+            for ax in axes:
+                ax.set_xlim(
+                    combined[:, 0].min() - x_margin,
+                    combined[:, 0].max() + x_margin,
+                )
+                ax.set_ylim(
+                    combined[:, 1].min() - y_margin,
+                    combined[:, 1].max() + y_margin,
+                )
+            fig.colorbar(
+                points,
+                ax=axes,
+                ticks=range(10),
+                label="Class label",
+                location="right",
+                pad=0.03,
+            )
+            fig.suptitle(
+                f"{DATASET_LABELS[fitted['dataset']]} · ResNet prediction on "
+                f"{len(novel_labels):,} novel rows"
+            )
+            display(fig)
+            plt.close(fig)
+
+    def update_resnet_button(*_) -> None:
+        resnet_button.disabled = not (
+            current_fit
+            and current_fit.get("transform_method") == "resnet"
+            and transform_method.value == "resnet"
+        )
 
     def select_dataset(change) -> None:
         selected = change["new"]
         previous = active_dataset["name"]
         fit_button.disabled = True
+        resnet_button.disabled = True
+        current_fit.clear()
+        projection_output.clear_output(wait=True)
         status.value = f"Loading {DATASET_LABELS[selected]} sample pool..."
         try:
             if selected not in pool_cache:
@@ -238,11 +392,12 @@ def display_interactive_embedding(
                 )
             active_dataset["name"] = selected
             X_selected, _ = pool_cache[selected]
-            sample_count.max = len(X_selected)
-            sample_count.value = min(sample_count.value, len(X_selected))
+            sample_count.max = min(max_instances, len(X_selected) // 2)
+            sample_count.value = min(sample_count.value, sample_count.max)
             status.value = (
                 f"{DATASET_LABELS[selected]} pool available: "
-                f"{len(X_selected):,} samples. Adjust controls and click Fit embedding."
+                f"{len(X_selected):,} samples ({sample_count.max:,} training plus "
+                "an equally sized novel pool). Adjust controls and click Fit embedding."
             )
         except Exception:
             status.value = f"Could not load {DATASET_LABELS[selected]}; see error details."
@@ -254,6 +409,9 @@ def display_interactive_embedding(
             fit_button.disabled = False
 
     def reset_sliders(_=None) -> None:
+        current_fit.clear()
+        resnet_button.disabled = True
+        projection_output.clear_output(wait=True)
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
         n_msts.value = 10
@@ -265,10 +423,19 @@ def display_interactive_embedding(
         logistic_temperature.value = 0.5
         negative_ratio.value = 5
         compute_knn.value = False
+        filter_2d_knn.value = False
+        filter_n_neighbors.value = 5
+        transform_method.value = "direct"
+        resnet_n_layers.value = 3
+        resnet_layer_size.value = 256
+        resnet_dropout.value = 0.1
         device.value = device_default
 
     def fit_and_display(_=None) -> None:
         fit_button.disabled = True
+        resnet_button.disabled = True
+        current_fit.clear()
+        projection_output.clear_output(wait=True)
         status.value = "Fitting the 2D embedding with the selected settings..."
         with output:
             clear_output(wait=True)
@@ -277,6 +444,13 @@ def display_interactive_embedding(
                 X_pool, labels_pool = pool_cache[active_dataset["name"]]
                 X = X_pool[:n_samples]
                 labels = labels_pool[:n_samples]
+                novel_X = X_pool[n_samples : 2 * n_samples]
+                novel_labels = labels_pool[n_samples : 2 * n_samples]
+                if len(novel_X) != n_samples:
+                    raise ValueError(
+                        "The selected dataset pool does not contain enough novel "
+                        "rows for a same-size prediction batch."
+                    )
                 estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     n_components=2,
@@ -290,12 +464,29 @@ def display_interactive_embedding(
                     attraction_dampening=attraction_dampening.value,
                     logistic_margin=logistic_margin.value,
                     logistic_temperature=logistic_temperature.value,
+                    transform_method=transform_method.value,
+                    resnet_n_layers=resnet_n_layers.value,
+                    resnet_layer_size=resnet_layer_size.value,
+                    resnet_dropout=resnet_dropout.value,
                     random_state=random_state,
                     device=device.value,
                 )
                 started = time.perf_counter()
                 embedding = estimator.fit_transform(X)
                 elapsed = time.perf_counter() - started
+                current_fit.update(
+                    {
+                        "estimator": estimator,
+                        "X": X.copy(),
+                        "labels": labels.copy(),
+                        "novel_X": novel_X.copy(),
+                        "novel_labels": novel_labels.copy(),
+                        "embedding": embedding.copy(),
+                        "dataset": active_dataset["name"],
+                        "transform_method": transform_method.value,
+                    }
+                )
+                update_resnet_button()
 
                 knn_title = ""
                 if compute_knn.value:
@@ -309,6 +500,21 @@ def display_interactive_embedding(
                         cv=cv,
                     ).mean()
                     knn_title = f" · 5-NN 5-fold CV accuracy={knn_accuracy:.3f}"
+                if filter_2d_knn.value:
+                    neighbors = NearestNeighbors(
+                        n_neighbors=filter_n_neighbors.value
+                    ).fit(
+                        embedding
+                    ).kneighbors(return_distance=False)
+                    plot_mask = np.all(labels[neighbors] == labels[:, None], axis=1)
+                    filter_title = (
+                        f" · 2D {filter_n_neighbors.value}-NN filter="
+                        f"{int(plot_mask.sum()):,}/"
+                        f"{n_samples:,}"
+                    )
+                else:
+                    plot_mask = np.ones(n_samples, dtype=bool)
+                    filter_title = ""
                 logistic_title = ""
                 if (
                     attraction_dampening.value == "logistic"
@@ -320,16 +526,27 @@ def display_interactive_embedding(
                     )
 
                 fig, ax = plt.subplots(figsize=(8, 6))
+                if filter_2d_knn.value:
+                    ax.scatter(
+                        embedding[~plot_mask, 0],
+                        embedding[~plot_mask, 1],
+                        c="lightgray",
+                        s=10,
+                        alpha=0.3,
+                        linewidths=0,
+                        zorder=1,
+                    )
                 points = ax.scatter(
-                    embedding[:, 0],
-                    embedding[:, 1],
-                    c=labels,
+                    embedding[plot_mask, 0],
+                    embedding[plot_mask, 1],
+                    c=labels[plot_mask],
                     cmap="tab10",
                     vmin=-0.5,
                     vmax=9.5,
                     s=10,
-                    alpha=0.8,
+                    alpha=1.0,
                     linewidths=0,
+                    zorder=2,
                 )
                 ax.set(
                     title=(
@@ -339,7 +556,7 @@ def display_interactive_embedding(
                         f"{distance_type.value} distance · "
                         f"{attraction_dampening.value} attraction · "
                         f"{repulsion_type.value} repulsion · weight_sum · "
-                        f"1,000 epochs{logistic_title}{knn_title}"
+                        f"1,000 epochs{logistic_title}{filter_title}{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
                     ylabel="Embedding dimension 2",
@@ -354,12 +571,20 @@ def display_interactive_embedding(
                         f"<b>{estimator.device_}</b>.</p>"
                     )
                 )
-                status.value = (
-                    "Embedding ready. Adjust the sliders and click Fit embedding "
-                    "to update it."
-                    if compute_knn.value
-                    else "Embedding ready. The optional 5-NN estimate was skipped."
-                )
+                status.value = "Embedding ready. "
+                if filter_2d_knn.value:
+                    status.value += (
+                        f"The 2D {filter_n_neighbors.value}-NN display filter "
+                        f"highlighted {int(plot_mask.sum()):,} of "
+                        f"{n_samples:,} points. "
+                    )
+                if not compute_knn.value:
+                    status.value += "The optional cross-validation estimate was skipped. "
+                if transform_method.value == "resnet":
+                    status.value += (
+                        "Click Show ResNet predictions to compare the network output. "
+                    )
+                status.value += "Adjust the controls and click Fit embedding to update it."
             except Exception:
                 status.value = "The fit failed; see the error details below."
                 traceback.print_exc()
@@ -367,8 +592,10 @@ def display_interactive_embedding(
                 fit_button.disabled = False
 
     dataset.observe(select_dataset, names="value")
+    transform_method.observe(update_resnet_button, names="value")
     fit_button.on_click(fit_and_display)
     reset_button.on_click(reset_sliders)
+    resnet_button.on_click(show_resnet_predictions)
 
     controls = widgets.VBox(
         [
@@ -378,16 +605,26 @@ def display_interactive_embedding(
             widgets.HBox([distance_type]),
             widgets.HBox([attraction_dampening, repulsion_type]),
             widgets.HBox([logistic_margin, logistic_temperature]),
-            widgets.HBox([compute_knn, device]),
+            widgets.HBox([compute_knn, filter_2d_knn, filter_n_neighbors]),
+            widgets.HBox([transform_method]),
+            widgets.HBox([resnet_n_layers, resnet_layer_size, resnet_dropout]),
+            widgets.HBox([device]),
         ]
     )
-    display(controls, widgets.HBox([fit_button, reset_button]), output)
+    display(
+        controls,
+        widgets.HBox([fit_button, reset_button, resnet_button]),
+        output,
+        projection_output,
+    )
 
     return {
         "controls": controls,
         "fit_button": fit_button,
+        "resnet_button": resnet_button,
         "reset_button": reset_button,
         "output": output,
+        "projection_output": projection_output,
         "status": status,
         "sliders": {
             "dataset": dataset,
@@ -401,6 +638,12 @@ def display_interactive_embedding(
             "logistic_temperature": logistic_temperature,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
+            "filter_2d_knn": filter_2d_knn,
+            "filter_n_neighbors": filter_n_neighbors,
+            "transform_method": transform_method,
+            "resnet_n_layers": resnet_n_layers,
+            "resnet_layer_size": resnet_layer_size,
+            "resnet_dropout": resnet_dropout,
             "device": device,
         },
     }

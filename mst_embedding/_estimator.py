@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import numpy as np
 import torch
+from torch import nn
 from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
@@ -72,6 +73,42 @@ def _validate_loss_output(name: str, value: object) -> torch.Tensor:
             "with respect to the supplied distances."
         )
     return value
+
+
+class _ResidualBlock(nn.Module):
+    """A fully connected residual block with dropout on its update."""
+
+    def __init__(self, width: int, dropout: float) -> None:
+        super().__init__()
+        self.linear1 = nn.Linear(width, width)
+        self.linear2 = nn.Linear(width, width)
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        update = self.linear1(inputs)
+        update = self.dropout(self.activation(update))
+        update = self.linear2(update)
+        return self.activation(inputs + self.dropout(update))
+
+
+class _ResidualProjector(nn.Module):
+    """Map standardized input features to standardized embedding coordinates."""
+
+    def __init__(
+        self, n_features: int, n_components: int, width: int, n_layers: int, dropout: float
+    ) -> None:
+        super().__init__()
+        self.input_layer = nn.Linear(n_features, width)
+        self.activation = nn.ReLU()
+        self.blocks = nn.Sequential(
+            *(_ResidualBlock(width, dropout) for _ in range(n_layers))
+        )
+        self.output_layer = nn.Linear(width, n_components)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        hidden = self.activation(self.input_layer(inputs))
+        return self.output_layer(self.blocks(hidden))
 
 
 def _squared_euclidean_distance(delta: torch.Tensor) -> torch.Tensor:
@@ -141,10 +178,10 @@ def _iterated_mst_edges(
 class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     """Embed a dataset with IMSTE using edge-disjoint minimum spanning trees.
 
-    The learned coordinates are attached to the training rows. Since the
-    objective jointly optimizes all rows, this estimator does not define an
-    out-of-sample projection: :meth:`transform` accepts only the original
-    training matrix, in its original row order.
+    The learned coordinates are attached to the training rows. By default,
+    :meth:`transform` accepts only the original training matrix in its original
+    row order. Set ``transform_method="resnet"`` to learn a residual-network
+    projection for new rows.
 
     Parameters
     ----------
@@ -188,6 +225,24 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Metal Performance Shaders (MPS) backend on macOS for datasets with at
         least 2048 samples; smaller datasets use the CPU to avoid GPU launch
         overhead. Explicitly select ``mps`` or ``cpu`` to override this choice.
+    transform_method : {'direct', 'resnet'}, default='direct'
+        ``'direct'`` returns fitted coordinates for the original training rows
+        and rejects new rows. ``'resnet'`` additionally fits a residual network
+        to the learned coordinates and uses it to transform new rows.
+    resnet_n_layers : int, default=3
+        Number of fully connected residual blocks in the projection network.
+    resnet_layer_size : int, default=256
+        Hidden width used by the projection network and its residual blocks.
+    resnet_dropout : float, default=0.1
+        Dropout probability in each residual block; must be in ``[0, 1)``.
+    resnet_epochs : int, default=200
+        Number of epochs used to fit the projection network.
+    resnet_batch_size : int, default=256
+        Number of training rows per projection-network update.
+    resnet_learning_rate : float, default=0.001
+        AdamW learning rate for the projection network.
+    resnet_weight_decay : float, default=0.0001
+        AdamW L2 weight decay for the projection network.
     attraction_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(positive_squared_distances,
         edge_weights)`` that returns a scalar differentiable PyTorch tensor.
@@ -226,6 +281,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         | None = None,
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
         repulsion_type: str = "bernoulli",
+        transform_method: str = "direct",
+        resnet_n_layers: int = 3,
+        resnet_layer_size: int = 256,
+        resnet_dropout: float = 0.1,
+        resnet_epochs: int = 200,
+        resnet_batch_size: int = 256,
+        resnet_learning_rate: float = 0.001,
+        resnet_weight_decay: float = 0.0001,
     ) -> None:
         self.n_msts = n_msts
         self.attraction_normalization = attraction_normalization
@@ -245,6 +308,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.attraction_loss_fn = attraction_loss_fn
         self.repulsion_loss_fn = repulsion_loss_fn
         self.repulsion_type = repulsion_type
+        self.transform_method = transform_method
+        self.resnet_n_layers = resnet_n_layers
+        self.resnet_layer_size = resnet_layer_size
+        self.resnet_dropout = resnet_dropout
+        self.resnet_epochs = resnet_epochs
+        self.resnet_batch_size = resnet_batch_size
+        self.resnet_learning_rate = resnet_learning_rate
+        self.resnet_weight_decay = resnet_weight_decay
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -255,6 +326,27 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         fit_started = time.perf_counter()
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)
+        if self.transform_method not in {"direct", "resnet"}:
+            raise ValueError("transform_method must be 'direct' or 'resnet'.")
+        resnet_n_layers = _positive_integer("resnet_n_layers", self.resnet_n_layers)
+        resnet_layer_size = _positive_integer(
+            "resnet_layer_size", self.resnet_layer_size
+        )
+        resnet_epochs = _positive_integer("resnet_epochs", self.resnet_epochs)
+        resnet_batch_size = _positive_integer(
+            "resnet_batch_size", self.resnet_batch_size
+        )
+        resnet_learning_rate = _finite_nonnegative(
+            "resnet_learning_rate", self.resnet_learning_rate, strictly_positive=True
+        )
+        resnet_weight_decay = _finite_nonnegative(
+            "resnet_weight_decay", self.resnet_weight_decay
+        )
+        resnet_dropout = _finite_nonnegative(
+            "resnet_dropout", self.resnet_dropout
+        )
+        if resnet_dropout >= 1:
+            raise ValueError("resnet_dropout must be a finite number in [0, 1).")
         if self.attraction_normalization != "weight_sum":
             raise ValueError("attraction_normalization must be 'weight_sum'.")
         if self.distance_type not in {"euclidean", "squared"}:
@@ -468,16 +560,121 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.embedding_ = coordinates.detach().cpu().numpy().copy()
         self.graph_edges_ = edge_array.copy()
         self.graph_weights_ = edge_weights.copy()
+        for attribute in (
+            "resnet_",
+            "resnet_X_mean_",
+            "resnet_X_scale_",
+            "resnet_embedding_mean_",
+            "resnet_embedding_scale_",
+            "resnet_fit_time_",
+            "resnet_training_loss_",
+        ):
+            if hasattr(self, attribute):
+                delattr(self, attribute)
+        if self.transform_method == "resnet":
+            resnet_started = time.perf_counter()
+            self.resnet_X_mean_ = X_checked.mean(axis=0)
+            self.resnet_X_scale_ = X_checked.std(axis=0)
+            self.resnet_X_scale_[self.resnet_X_scale_ == 0.0] = 1.0
+            self.resnet_embedding_mean_ = self.embedding_.mean(axis=0)
+            self.resnet_embedding_scale_ = self.embedding_.std(axis=0)
+            self.resnet_embedding_scale_[self.resnet_embedding_scale_ == 0.0] = 1.0
+
+            X_resnet = np.asarray(
+                (X_checked - self.resnet_X_mean_) / self.resnet_X_scale_,
+                dtype=np.float32,
+            )
+            y_resnet = np.asarray(
+                (self.embedding_ - self.resnet_embedding_mean_)
+                / self.resnet_embedding_scale_,
+                dtype=np.float32,
+            )
+            X_resnet_t = torch.as_tensor(X_resnet, device=compute_device)
+            y_resnet_t = torch.as_tensor(y_resnet, device=compute_device)
+            resnet_seed = int(rng.randint(0, np.iinfo(np.int32).max))
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(resnet_seed)
+                self.resnet_ = _ResidualProjector(
+                    X_checked.shape[1],
+                    n_components,
+                    resnet_layer_size,
+                    resnet_n_layers,
+                    resnet_dropout,
+                ).to(compute_device)
+                resnet_optimizer = torch.optim.AdamW(
+                    self.resnet_.parameters(),
+                    lr=resnet_learning_rate,
+                    weight_decay=resnet_weight_decay,
+                )
+                self.resnet_.train()
+                for _ in range(resnet_epochs):
+                    order = rng.permutation(n_samples)
+                    for start in range(0, n_samples, resnet_batch_size):
+                        batch = order[start : start + resnet_batch_size]
+                        batch_t = torch.as_tensor(
+                            batch, dtype=torch.long, device=compute_device
+                        )
+                        prediction = self.resnet_(X_resnet_t[batch_t])
+                        loss = torch.mean(
+                            (prediction - y_resnet_t[batch_t]) ** 2
+                        )
+                        resnet_optimizer.zero_grad(set_to_none=True)
+                        loss.backward()
+                        resnet_optimizer.step()
+                self.resnet_.eval()
+            if compute_device.type == "mps":
+                torch.mps.synchronize()
+            self.resnet_fit_time_ = time.perf_counter() - resnet_started
+            self.resnet_training_loss_ = float(loss.detach().cpu())
         self.fit_time_ = time.perf_counter() - fit_started
         return self
 
     def transform(self, X: object) -> np.ndarray:
-        """Return stored coordinates for the exact training matrix only."""
+        """Return fitted coordinates or project new rows with the selected model."""
         check_is_fitted(self, attributes=["embedding_", "X_fit_"])
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
-        if X_checked.shape != self.X_fit_.shape or not np.array_equal(X_checked, self.X_fit_):
+        if X_checked.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X_checked.shape[1]} features, but this estimator was fitted "
+                f"with {self.n_features_in_} features."
+            )
+        if X_checked.shape == self.X_fit_.shape and np.array_equal(
+            X_checked, self.X_fit_
+        ):
+            return self.embedding_.copy()
+        if self.transform_method != "resnet":
             raise ValueError(
                 "transform is available only for the original training rows in "
-                "the same order; this estimator has no out-of-sample projection."
+                "the same order when transform_method='direct'. Set "
+                "transform_method='resnet' to project new rows."
             )
-        return self.embedding_.copy()
+        return self.transform_with_resnet(X_checked)
+
+    def transform_with_resnet(self, X: object) -> np.ndarray:
+        """Apply the fitted ResNet projection, including to training rows."""
+        check_is_fitted(self, attributes=["resnet_"])
+        X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
+        if X_checked.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X_checked.shape[1]} features, but this estimator was fitted "
+                f"with {self.n_features_in_} features."
+            )
+        X_resnet = np.asarray(
+            (X_checked - self.resnet_X_mean_) / self.resnet_X_scale_,
+            dtype=np.float32,
+        )
+        predictions: list[np.ndarray] = []
+        device = torch.device(self.device_)
+        self.resnet_.eval()
+        with torch.no_grad():
+            for start in range(0, len(X_resnet), self.resnet_batch_size):
+                batch = torch.as_tensor(
+                    X_resnet[start : start + self.resnet_batch_size],
+                    device=device,
+                )
+                predictions.append(self.resnet_(batch).cpu().numpy())
+        transformed = np.concatenate(predictions, axis=0).astype(np.float64)
+        return (
+            transformed * self.resnet_embedding_scale_
+            + self.resnet_embedding_mean_
+        )
