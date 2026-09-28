@@ -46,10 +46,10 @@ def display_interactive_embedding(
 ) -> dict[str, object]:
     """Load a fixed data pool and display controls for fitting a 2D embedding.
 
-    Sliders configure sample count, MST count, repulsion, and negative
-    sampling. Fits use 1,000 epochs and a 0.05 learning rate. The embedding is fit only
-    when the user clicks the fit button. Returns widget references for notebook
-    customization.
+    Controls configure sample count, MST count, attraction normalization,
+    repulsion, and negative sampling. Fits use 1,000 epochs and a 0.05 learning
+    rate. The embedding is fit only when the user clicks the fit button.
+    Returns widget references for notebook customization.
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
@@ -66,7 +66,7 @@ def display_interactive_embedding(
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
-        "1,000 epochs. Click Fit embedding to run."
+        "weight_sum attraction, 1,000 epochs. Click Fit embedding to run."
     )
 
     sample_count = widgets.IntSlider(
@@ -104,6 +104,15 @@ def display_interactive_embedding(
         ],
         value="bernoulli",
         description="Repulsion force",
+        style={"description_width": "initial"},
+    )
+    attraction_normalization = widgets.Dropdown(
+        options=[
+            ("Weight sum (default)", "weight_sum"),
+            ("Mean by edge count", "mean"),
+        ],
+        value="weight_sum",
+        description="Attraction normalization",
         style={"description_width": "initial"},
     )
     negative_ratio = widgets.IntSlider(
@@ -151,6 +160,7 @@ def display_interactive_embedding(
         n_msts.value = 10
         lambda_rep.value = 0.5
         repulsion_type.value = "bernoulli"
+        attraction_normalization.value = "weight_sum"
         negative_ratio.value = 5
         compute_knn.value = False
         device.value = device_default
@@ -173,6 +183,7 @@ def display_interactive_embedding(
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
                     repulsion_type=repulsion_type.value,
+                    attraction_normalization=attraction_normalization.value,
                     random_state=random_state,
                     device=device.value,
                 )
@@ -209,6 +220,7 @@ def display_interactive_embedding(
                     title=(
                         f"2D IMSTE · {n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
+                        f"{attraction_normalization.value} attraction · "
                         f"1,000 epochs{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
@@ -244,6 +256,7 @@ def display_interactive_embedding(
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([repulsion_type]),
+            widgets.HBox([attraction_normalization]),
             widgets.HBox([compute_knn, device]),
         ]
     )
@@ -260,6 +273,7 @@ def display_interactive_embedding(
             "n_msts": n_msts,
             "lambda_rep": lambda_rep,
             "repulsion_type": repulsion_type,
+            "attraction_normalization": attraction_normalization,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
             "device": device,

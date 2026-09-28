@@ -284,6 +284,7 @@ def run_high_dim_mst_gallery(
 
     return {
         "embeddings": embeddings,
+        "datasets": datasets,
         "summary": pd.DataFrame(summaries),
         "load_errors": load_errors,
     }
