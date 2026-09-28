@@ -77,14 +77,14 @@ def display_interactive_embedding(
     initial_sample_count: int = 1000,
     random_state: int = 42,
 ) -> dict[str, object]:
-    """Load MNIST and display controls for fitting a 2D embedding.
+    """Load image pools and display controls for fitting a 2D embedding.
 
-    Dataset choices load lazily and cache balanced sample pools. Controls
-    configure sample count, MST count, distance and loss shapes, and negative
-    sampling. Attraction uses fixed weight-sum normalization. Fits
-    use 1,000 epochs and a 0.05 learning rate. The embedding is fit only when
-    the user clicks the fit button. Returns widget references for notebook
-    customization.
+    Dataset choices load lazily and cache balanced sample pools with separate,
+    disjoint training and novel rows. Controls configure sample count, MST
+    count, distance and loss shapes, and negative sampling. Attraction uses
+    fixed weight-sum normalization. Fits use 1,000 epochs and a 0.05 learning
+    rate. The embedding is fit only when the user clicks the fit button.
+    Returns widget references for notebook customization.
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
@@ -123,7 +123,7 @@ def display_interactive_embedding(
         f"{DATASET_LABELS['mnist']} pool available: {len(X_pool):,} samples "
         f"({max_training_instances:,} training plus an equally sized novel pool). "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
-        "squared distance, log attraction, Bernoulli repulsion, "
+        "squared distance, log attraction, logistic repulsion, "
         "weight_sum normalization, 1,000 epochs. "
         "Click Fit embedding to run."
     )
@@ -158,11 +158,11 @@ def display_interactive_embedding(
     )
     repulsion_type = widgets.Dropdown(
         options=[
+            ("Logistic margin", "logistic"),
             ("Log / Bernoulli", "bernoulli"),
             ("Inverse distance", "inverse_distance"),
-            ("Logistic margin", "logistic"),
         ],
-        value="bernoulli",
+        value="logistic",
         description="Repulsion dampening",
         style={"description_width": "initial"},
     )
@@ -287,7 +287,10 @@ def display_interactive_embedding(
     )
     resnet_button = widgets.Button(
         description="Show ResNet predictions",
-        tooltip="Compare optimized coordinates with the fitted network's predictions.",
+        tooltip=(
+            "Compare the training embedding with predictions for a disjoint, "
+            "same-size batch from the same dataset."
+        ),
         icon="eye",
         disabled=True,
     )
@@ -302,7 +305,6 @@ def display_interactive_embedding(
         with projection_output:
             clear_output(wait=True)
             estimator = fitted["estimator"]
-            X = fitted["X"]
             labels = fitted["labels"]
             novel_X = fitted["novel_X"]
             novel_labels = fitted["novel_labels"]
@@ -344,16 +346,20 @@ def display_interactive_embedding(
                 ax.set_aspect("equal", adjustable="box")
             axes[0].set_ylabel("Embedding dimension 2")
             combined = np.vstack((embedding, predicted))
-            x_margin = max(np.ptp(combined[:, 0]) * 0.03, 0.1)
-            y_margin = max(np.ptp(combined[:, 1]) * 0.03, 0.1)
+            # Use central 99.5% intervals per coordinate. By the union bound,
+            # this keeps at least 99% of points inside the shared 2D viewport.
+            x_min, x_max = np.quantile(combined[:, 0], [0.0025, 0.9975])
+            y_min, y_max = np.quantile(combined[:, 1], [0.0025, 0.9975])
+            x_margin = max((x_max - x_min) * 0.03, 0.1)
+            y_margin = max((y_max - y_min) * 0.03, 0.1)
             for ax in axes:
                 ax.set_xlim(
-                    combined[:, 0].min() - x_margin,
-                    combined[:, 0].max() + x_margin,
+                    x_min - x_margin,
+                    x_max + x_margin,
                 )
                 ax.set_ylim(
-                    combined[:, 1].min() - y_margin,
-                    combined[:, 1].max() + y_margin,
+                    y_min - y_margin,
+                    y_max + y_margin,
                 )
             fig.colorbar(
                 points,
@@ -416,7 +422,7 @@ def display_interactive_embedding(
         sample_count.value = min(1000, sample_count.max)
         n_msts.value = 10
         lambda_rep.value = 0.5
-        repulsion_type.value = "bernoulli"
+        repulsion_type.value = "logistic"
         distance_type.value = "squared"
         attraction_dampening.value = "log"
         logistic_margin.value = 1.0
@@ -477,9 +483,8 @@ def display_interactive_embedding(
                 current_fit.update(
                     {
                         "estimator": estimator,
-                        "X": X.copy(),
                         "labels": labels.copy(),
-                        "novel_X": novel_X.copy(),
+                        "novel_X": novel_X,
                         "novel_labels": novel_labels.copy(),
                         "embedding": embedding.copy(),
                         "dataset": active_dataset["name"],
@@ -582,7 +587,8 @@ def display_interactive_embedding(
                     status.value += "The optional cross-validation estimate was skipped. "
                 if transform_method.value == "resnet":
                     status.value += (
-                        "Click Show ResNet predictions to compare the network output. "
+                        "Click Show ResNet predictions to project an equally sized "
+                        "novel batch. "
                     )
                 status.value += "Adjust the controls and click Fit embedding to update it."
             except Exception:

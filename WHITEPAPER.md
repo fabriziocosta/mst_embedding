@@ -191,7 +191,7 @@ L_{uv}^{-}=\operatorname{softplus}\left(\frac{m-z_{uv}}{\tau}\right),
 $$
 
 with the same `logistic_margin` $m$ and `logistic_temperature` $\tau$ used by
-logistic attraction. The default is `repulsion_type="bernoulli"`. All three
+logistic attraction. The default is `repulsion_type="logistic"`. All three
 repulsion types use the unweighted mean of losses over the
 sampled set of negative pairs. The MST-rank weights are not applied to
 negative samples.
@@ -247,7 +247,7 @@ with a fixed inverse-rank weight for each edge.
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
-| `repulsion_type` | `bernoulli` | Negative-pair shaping: Bernoulli log, inverse distance, or logistic |
+| `repulsion_type` | `logistic` | Negative-pair shaping: Bernoulli log, inverse distance, or logistic |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
 | `device` | `auto` | CPU or Apple MPS optimization backend |

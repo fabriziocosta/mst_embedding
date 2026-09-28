@@ -250,10 +250,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         ``attraction_dampening``.
     repulsion_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(negative_squared_distances,
-        epsilon)`` that returns a scalar differentiable PyTorch tensor. The
-        default is :func:`mst_embedding.bernoulli_repulsion_loss`, which
-        evaluates the negative-pair loss ``-log(1 - q)``.
-    repulsion_type : {'bernoulli', 'inverse_distance', 'logistic'}, default='bernoulli'
+        epsilon)`` that returns a scalar differentiable PyTorch tensor. When
+        supplied, this overrides ``repulsion_type``.
+    repulsion_type : {'bernoulli', 'inverse_distance', 'logistic'}, default='logistic'
         Built-in negative-pair loss. ``'inverse_distance'`` selects the
         ``1 / (1 + distance + epsilon)`` penalty; ``'logistic'`` selects the
         negative logistic margin loss. This is ignored when
@@ -280,7 +279,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
         | None = None,
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
-        repulsion_type: str = "bernoulli",
+        repulsion_type: str = "logistic",
         transform_method: str = "direct",
         resnet_n_layers: int = 3,
         resnet_layer_size: int = 256,

@@ -64,8 +64,10 @@ Each observation gets a trainable coordinate vector `y_i` in
 `distance_type="squared"` (the default) uses `z=t`; `"euclidean"` uses a
 smoothed Euclidean distance. Positive graph edges apply the selected
 `attraction_dampening` to `z`; sampled non-edges apply the selected
-`repulsion_type`. The defaults, `log` and `bernoulli`, retain the current
-pairwise probability losses. `inverse_distance` uses
+`repulsion_type`. The defaults, `log` attraction and `logistic` repulsion,
+combine a logarithmic positive-edge loss with a margin-based negative-edge
+loss. `bernoulli` retains the negative pairwise probability loss.
+`inverse_distance` uses
 `1 / (1 + z + epsilon)`, while `logistic` uses a margin-based loss. Negative
 losses are averaged without MST-rank weights. Adam minimizes the convex combination
 `(1 - lambda_rep) * attraction + lambda_rep * repulsion`. Here `lambda_rep` is
@@ -129,7 +131,7 @@ matrix only. `transform_method="resnet"` additionally fits a residual network
 so `transform` can project unseen rows.
 
 The main parameters are `n_msts=10`, `distance_type="squared"`,
-`attraction_dampening="log"`, `repulsion_type="bernoulli"`,
+`attraction_dampening="log"`, `repulsion_type="logistic"`,
 `logistic_margin=1.0`, `logistic_temperature=0.5`, `n_components=2`, `n_epochs=1000`,
 `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and

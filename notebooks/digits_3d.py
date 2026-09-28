@@ -36,7 +36,7 @@ def fit_and_plot_mst_3d(
     random_state=42,
     device="auto",
     trustworthiness_neighbors=10,
-    repulsion_type="bernoulli",
+    repulsion_type="logistic",
 ):
     """Fit one 3D IMSTE embedding and return its scores and Plotly figure."""
     X = np.asarray(X)
@@ -225,10 +225,11 @@ def display_interactive_mst_3d(
     )
     repulsion_type = widgets.Dropdown(
         options=[
+            ("Logistic margin", "logistic"),
             ("Bernoulli (log)", "bernoulli"),
             ("Inverse distance (previous)", "inverse_distance"),
         ],
-        value="bernoulli",
+        value="logistic",
         description="Repulsion force",
         style={"description_width": "initial"},
     )
@@ -281,7 +282,7 @@ def display_interactive_mst_3d(
         learning_rate.value = 0.05
         negative_ratio.value = 5
         lambda_rep.value = 0.5
-        repulsion_type.value = "bernoulli"
+        repulsion_type.value = "logistic"
         epsilon.value = 1e-4
         random_state_slider.value = 42
         trustworthiness_neighbors.value = 10

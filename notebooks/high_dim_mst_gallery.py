@@ -175,7 +175,7 @@ def run_high_dim_mst_gallery(
     batch_size: int = 4096,
     negative_ratio: int = 5,
     lambda_rep: float = 0.5,
-    repulsion_type: str = "bernoulli",
+    repulsion_type: str = "logistic",
     sample_plot_rows: int = 2,
     random_state: int = 42,
     device: str | None = None,
