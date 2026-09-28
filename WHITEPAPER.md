@@ -107,13 +107,13 @@ $$
 q_{ij}=\frac{1}{1+d_{ij}^2+\epsilon}.
 $$
 
-With the default `attraction_normalization="mean"`, the attractive term is
+With the default `attraction_normalization="weight_sum"`, the attractive term is
 
 $$
 L_{\mathrm{attr}}=
-\frac{1}{|E|}\sum_{(i,j)\in E}
+\frac{1}{\sum_{(i,j)\in E}w_{ij}}\sum_{(i,j)\in E}
 w_{ij}\bigl[-\log(q_{ij})\bigr]
-=\frac{1}{|E|}\sum_{(i,j)\in E}
+=\frac{1}{\sum_{(i,j)\in E}w_{ij}}\sum_{(i,j)\in E}
 w_{ij}\log(1+d_{ij}^2+\epsilon).
 $$
 
@@ -121,13 +121,13 @@ This is the Bernoulli negative log-likelihood for a positive edge. Minimizing
 it brings graph-connected samples together. The MST-rank weight applies to
 positive edges only.
 
-The optional `attraction_normalization="weight_sum"` variant uses
-`sum(w_ij * log(1 + d_ij^2 + epsilon)) / sum(w_ij)` instead. This keeps the attraction
+The alternative `attraction_normalization="mean"` uses
+`sum(w_ij * log(1 + d_ij^2 + epsilon)) / |E|`, preserving the original
+edge-count normalization. The default `"weight_sum"` keeps the attraction
 scale from falling simply because more, lower-weight MST ranks were added.
-The default remains the original edge-count mean so the variant can be
-compared without changing baseline behavior. With minibatch optimization, the
-implementation scales each minibatch's weighted mean by the graph-wide ratio
-`|E| / sum(w)` to estimate this normalized objective.
+With minibatch optimization, the implementation scales each minibatch's
+weighted mean by the graph-wide ratio `|E| / sum(w)` to estimate this
+normalized objective.
 
 ### 4.2 Repulsion on sampled non-edges
 
@@ -174,12 +174,11 @@ $$
 
 The parameter `lambda_rep` is the repulsion share $\lambda\in[0,1]$; the
 attraction share is $1-\lambda$. The default $\lambda=0.5$ gives equal
-weight to the two terms. With the default `attraction_normalization="mean"`,
-the implementation uses the mean of weighted positive-edge losses and the
-mean of sampled negative losses.
-Under `"weight_sum"`, it rescales positive edge weights to estimate the
-objective normalized by their graph-wide sum; the negative term remains
-unchanged.
+weight to the two terms. With the default
+`attraction_normalization="weight_sum"`, the implementation normalizes the
+weighted positive-edge losses by their graph-wide total weight. Under
+`"mean"`, it uses their mean by edge count; the negative term remains
+unchanged under either option.
 
 The losses are modular. The estimator accepts an optional
 `attraction_loss_fn` callable that receives positive squared distances and edge
@@ -205,7 +204,7 @@ with a fixed inverse-rank weight for each edge.
 | Parameter | Default | Role |
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
-| `attraction_normalization` | `mean` | Attraction denominator: edge count or total edge weight |
+| `attraction_normalization` | `weight_sum` | Attraction denominator: edge count or total edge weight |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |

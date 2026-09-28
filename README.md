@@ -99,7 +99,7 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=10`, `attraction_normalization="mean"`,
+The main parameters are `n_msts=10`, `attraction_normalization="weight_sum"`,
 `n_components=2`, `n_epochs=1000`, `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
@@ -111,11 +111,10 @@ because GPU launch overhead was higher for a smaller handwritten-digits dataset.
 Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
 selected backend is available as `estimator.device_` after fitting.
 
-`attraction_normalization="mean"` preserves the original attraction loss
-normalization by edge count. Set it to `"weight_sum"` to normalize by the sum
-of edge weights, which reduces the attraction-scale change as more low-weight
-MST ranks are added. This option is a comparison variant; it does not change
-the default objective.
+`attraction_normalization="weight_sum"` normalizes attraction by the sum of
+edge weights, which reduces the attraction-scale change as more low-weight
+MST ranks are added. Set it to `"mean"` to normalize by edge count, preserving
+the original behavior.
 
 The attraction and repulsion losses can be replaced independently with
 `attraction_loss_fn` and `repulsion_loss_fn`. Each callable must return a scalar

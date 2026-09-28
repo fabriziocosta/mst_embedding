@@ -135,9 +135,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     ----------
     n_msts : int, default=10
         Number of edge-disjoint minimum spanning trees to construct.
-    attraction_normalization : {'mean', 'weight_sum'}, default='mean'
+    attraction_normalization : {'mean', 'weight_sum'}, default='weight_sum'
         Normalize the weighted attraction by the number of graph edges
-        ('mean', the original behavior) or by the sum of graph edge weights.
+        ('mean') or by the sum of graph edge weights ('weight_sum').
     n_components : int, default=2
         Number of embedding coordinates per sample.
     n_epochs : int, default=1000
@@ -190,7 +190,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         random_state: int | None = 42,
         epsilon: float = 1e-4,
         device: str = "auto",
-        attraction_normalization: str = "mean",
+        attraction_normalization: str = "weight_sum",
         attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
         | None = None,
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
