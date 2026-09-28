@@ -121,13 +121,33 @@ This is the Bernoulli negative log-likelihood for a positive edge. Minimizing
 it brings graph-connected samples together. The MST-rank weight applies to
 positive edges only.
 
-The alternative `attraction_normalization="mean"` uses
-`sum(w_ij * log(1 + d_ij^2 + epsilon)) / |E|`, preserving the original
-edge-count normalization. The default `"weight_sum"` keeps the attraction
-scale from falling simply because more, lower-weight MST ranks were added.
-With minibatch optimization, the implementation scales each minibatch's
-weighted mean by the graph-wide ratio `|E| / sum(w)` to estimate this
-normalized objective.
+Weight-sum normalization keeps the attraction scale from falling simply
+because more, lower-weight MST ranks were added. With minibatch optimization,
+the implementation scales each minibatch's weighted mean by the graph-wide
+ratio `|E| / sum(w)` to estimate this normalized objective.
+
+The built-in attraction can be selected with `attraction_type`. The default
+`"log"` uses the loss above. `"euclidean"` instead uses the smoothed direct
+distance
+
+$$
+\rho_{\mathrm{euclidean}}(d)=\sqrt{d^2+\epsilon}-\sqrt{\epsilon},
+$$
+
+while `"squared"` uses $\rho_{\mathrm{squared}}(d)=d^2$. `"huber"` applies a
+Huber penalty to the same smoothed distance $s=\rho_{\mathrm{euclidean}}(d)$,
+with transition $\delta=1$:
+
+$$
+\rho_{\mathrm{huber}}(s)=
+\begin{cases}
+\frac{1}{2}s^2 & s\leq 1,\\
+s-\frac{1}{2} & s>1.
+\end{cases}
+$$
+
+All variants use the same edge weights and weight-sum normalization. A custom
+`attraction_loss_fn` takes precedence over `attraction_type`.
 
 ### 4.2 Repulsion on sampled non-edges
 
@@ -174,15 +194,13 @@ $$
 
 The parameter `lambda_rep` is the repulsion share $\lambda\in[0,1]$; the
 attraction share is $1-\lambda$. The default $\lambda=0.5$ gives equal
-weight to the two terms. With the default
-`attraction_normalization="weight_sum"`, the implementation normalizes the
-weighted positive-edge losses by their graph-wide total weight. Under
-`"mean"`, it uses their mean by edge count; the negative term remains
-unchanged under either option.
+weight to the two terms. The implementation normalizes the weighted
+positive-edge losses by their graph-wide total weight; the negative term is
+unchanged.
 
 The losses are modular. The estimator accepts an optional
-`attraction_loss_fn` callable that receives positive squared distances and edge
-weights (scaled according to `attraction_normalization`), and an optional
+`attraction_loss_fn` callable that receives positive squared distances and
+edge weights scaled for graph-wide total-weight normalization, and an optional
 `repulsion_loss_fn` callable that receives negative squared distances and
 epsilon. Each callable must return a scalar differentiable PyTorch tensor. If
 either hook is omitted, its built-in default is used. `repulsion_type` selects
@@ -204,7 +222,8 @@ with a fixed inverse-rank weight for each edge.
 | Parameter | Default | Role |
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
-| `attraction_normalization` | `weight_sum` | Attraction denominator: edge count or total edge weight |
+| `attraction_normalization` | `weight_sum` (fixed) | Attraction denominator: total edge weight |
+| `attraction_type` | `log` | Positive-edge penalty: `log`, `euclidean`, `squared`, or `huber` |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |

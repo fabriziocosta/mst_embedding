@@ -13,19 +13,52 @@ import torch
 from IPython.display import HTML, clear_output, display
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts this directory directly on sys.path.
     from digits_sweep import load_mnist_data
+    from high_dim_mst_gallery import _load_kmnist, _load_openml, _stratified_sample
 except ModuleNotFoundError:  # Also support importing as notebooks.digits_2d.
     from .digits_sweep import load_mnist_data
+    from .high_dim_mst_gallery import _load_kmnist, _load_openml, _stratified_sample
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 
-def _load_balanced_pool(max_instances: int, random_state: int) -> tuple[np.ndarray, np.ndarray]:
-    X_pool, labels_pool = load_mnist_data(
-        sample_size=max_instances,
-        random_state=random_state,
-    )
+DATASET_LABELS = {
+    "mnist": "MNIST",
+    "fashion_mnist": "Fashion-MNIST",
+    "kmnist": "Kuzushiji-MNIST",
+}
+
+
+def _load_balanced_pool(
+    dataset: str,
+    max_instances: int,
+    random_state: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if dataset == "mnist":
+        X_pool, labels_pool = load_mnist_data(
+            sample_size=max_instances,
+            random_state=random_state,
+        )
+    elif dataset == "fashion_mnist":
+        X, labels = _load_openml("Fashion-MNIST")
+        X_pool, labels_pool = _stratified_sample(
+            X, labels, max_samples=max_instances, random_state=random_state
+        )
+        X_pool = StandardScaler().fit_transform(
+            np.asarray(X_pool, dtype=np.float32)
+        )
+    elif dataset == "kmnist":
+        X, labels = _load_kmnist()
+        X_pool, labels_pool = _stratified_sample(
+            X, labels, max_samples=max_instances, random_state=random_state
+        )
+        X_pool = StandardScaler().fit_transform(
+            np.asarray(X_pool, dtype=np.float32)
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {dataset!r}.")
 
     rng = np.random.RandomState(random_state)
     class_indices = [
@@ -46,10 +79,11 @@ def display_interactive_embedding(
 ) -> dict[str, object]:
     """Load a fixed data pool and display controls for fitting a 2D embedding.
 
-    Controls configure sample count, MST count, attraction normalization,
-    repulsion, and negative sampling. Fits use 1,000 epochs and a 0.05 learning
-    rate. The embedding is fit only when the user clicks the fit button.
-    Returns widget references for notebook customization.
+    Controls configure sample count, MST count, attraction and repulsion
+    losses, and negative sampling. Attraction uses fixed weight-sum
+    normalization. Fits use 1,000 epochs and a 0.05 learning rate. The
+    embedding is fit only when the user clicks the fit button. Returns widget
+    references for notebook customization.
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
@@ -57,16 +91,30 @@ def display_interactive_embedding(
         raise ValueError("initial_sample_count must be at least 500.")
     initial_sample_count = min(initial_sample_count, max_instances)
 
+    dataset = widgets.Dropdown(
+        options=[
+            ("MNIST", "mnist"),
+            ("Fashion-MNIST", "fashion_mnist"),
+            ("Kuzushiji-MNIST", "kmnist"),
+        ],
+        value="mnist",
+        description="Dataset",
+        style={"description_width": "initial"},
+    )
     status = widgets.HTML(value="Loading stratified MNIST sample pool...")
     display(status)
-    X_pool, labels_pool = _load_balanced_pool(max_instances, random_state)
+    max_pool_instances = max_instances
+    X_pool, labels_pool = _load_balanced_pool("mnist", max_instances, random_state)
+    pool_cache = {"mnist": (X_pool, labels_pool)}
+    active_dataset = {"name": "mnist"}
     max_instances = len(X_pool)
     initial_sample_count = min(initial_sample_count, max_instances)
     minimum_sample_count = min(500, max_instances)
     status.value = (
-        f"Balanced pool available: {max_instances:,} samples. "
+        f"{DATASET_LABELS['mnist']} pool available: {max_instances:,} samples. "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
-        "weight_sum attraction, 1,000 epochs. Click Fit embedding to run."
+        "log attraction, weight_sum normalization, 1,000 epochs. "
+        "Click Fit embedding to run."
     )
 
     sample_count = widgets.IntSlider(
@@ -106,13 +154,15 @@ def display_interactive_embedding(
         description="Repulsion force",
         style={"description_width": "initial"},
     )
-    attraction_normalization = widgets.Dropdown(
+    attraction_type = widgets.Dropdown(
         options=[
-            ("Weight sum (default)", "weight_sum"),
-            ("Mean by edge count", "mean"),
+            ("Log (current)", "log"),
+            ("Euclidean distance", "euclidean"),
+            ("Squared distance", "squared"),
+            ("Huber distance", "huber"),
         ],
-        value="weight_sum",
-        description="Attraction normalization",
+        value="log",
+        description="Attraction loss",
         style={"description_width": "initial"},
     )
     negative_ratio = widgets.IntSlider(
@@ -160,7 +210,7 @@ def display_interactive_embedding(
         n_msts.value = 10
         lambda_rep.value = 0.5
         repulsion_type.value = "bernoulli"
-        attraction_normalization.value = "weight_sum"
+        attraction_type.value = "log"
         negative_ratio.value = 5
         compute_knn.value = False
         device.value = device_default
@@ -183,7 +233,7 @@ def display_interactive_embedding(
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
                     repulsion_type=repulsion_type.value,
-                    attraction_normalization=attraction_normalization.value,
+                    attraction_type=attraction_type.value,
                     random_state=random_state,
                     device=device.value,
                 )
@@ -220,7 +270,7 @@ def display_interactive_embedding(
                     title=(
                         f"2D IMSTE · {n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
-                        f"{attraction_normalization.value} attraction · "
+                        f"{attraction_type.value} attraction · weight_sum · "
                         f"1,000 epochs{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
@@ -255,8 +305,8 @@ def display_interactive_embedding(
         [
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([lambda_rep, negative_ratio]),
+            widgets.HBox([attraction_type]),
             widgets.HBox([repulsion_type]),
-            widgets.HBox([attraction_normalization]),
             widgets.HBox([compute_knn, device]),
         ]
     )
@@ -272,8 +322,8 @@ def display_interactive_embedding(
             "sample_count": sample_count,
             "n_msts": n_msts,
             "lambda_rep": lambda_rep,
+            "attraction_type": attraction_type,
             "repulsion_type": repulsion_type,
-            "attraction_normalization": attraction_normalization,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
             "device": device,

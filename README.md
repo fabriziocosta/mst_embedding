@@ -99,8 +99,9 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=10`, `attraction_normalization="weight_sum"`,
-`n_components=2`, `n_epochs=1000`, `batch_size=4096`, `learning_rate=0.05`,
+The main parameters are `n_msts=10`, `attraction_type="log"`,
+`n_components=2`, `n_epochs=1000`,
+`batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
 `1 / rank`, so later trees receive smaller weights. `negative_ratio` samples
@@ -111,10 +112,13 @@ because GPU launch overhead was higher for a smaller handwritten-digits dataset.
 Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
 selected backend is available as `estimator.device_` after fitting.
 
-`attraction_normalization="weight_sum"` normalizes attraction by the sum of
-edge weights, which reduces the attraction-scale change as more low-weight
-MST ranks are added. Set it to `"mean"` to normalize by edge count, preserving
-the original behavior.
+Attraction is normalized by the sum of graph edge weights. This keeps its
+scale more consistent as additional low-weight MST ranks are added.
+Choose `attraction_type="log"` (the default), `"euclidean"`, `"squared"`, or
+`"huber"` to compare the current logarithmic penalty, Euclidean distance,
+squared Euclidean distance, or a Huber penalty on Euclidean distance. The
+Huber transition is at distance 1. A custom `attraction_loss_fn` overrides
+`attraction_type`.
 
 The attraction and repulsion losses can be replaced independently with
 `attraction_loss_fn` and `repulsion_loss_fn`. Each callable must return a scalar
@@ -134,6 +138,7 @@ embedding = IteratedMinimumSpanningTreeEmbedder(
 ).fit_transform(X)
 ```
 
-The built-in `log_attraction_loss`, `bernoulli_repulsion_loss`, and
-`inverse_distance_repulsion_loss` functions are exported from `mst_embedding`
-for reuse or comparison.
+The built-in `log_attraction_loss`, `euclidean_attraction_loss`,
+`squared_distance_attraction_loss`, `huber_attraction_loss`,
+`bernoulli_repulsion_loss`, and `inverse_distance_repulsion_loss` functions are
+exported from `mst_embedding` for reuse or comparison.
