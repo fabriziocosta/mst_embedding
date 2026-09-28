@@ -77,13 +77,14 @@ def display_interactive_embedding(
     initial_sample_count: int = 1000,
     random_state: int = 42,
 ) -> dict[str, object]:
-    """Load a fixed data pool and display controls for fitting a 2D embedding.
+    """Load MNIST and display controls for fitting a 2D embedding.
 
-    Controls configure sample count, MST count, attraction and repulsion
-    losses, and negative sampling. Attraction uses fixed weight-sum
-    normalization. Fits use 1,000 epochs and a 0.05 learning rate. The
-    embedding is fit only when the user clicks the fit button. Returns widget
-    references for notebook customization.
+    Dataset choices load lazily and cache balanced sample pools. Controls
+    configure sample count, MST count, distance and loss shapes, and negative
+    sampling. Attraction uses fixed weight-sum normalization. Fits
+    use 1,000 epochs and a 0.05 learning rate. The embedding is fit only when
+    the user clicks the fit button. Returns widget references for notebook
+    customization.
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
@@ -113,7 +114,8 @@ def display_interactive_embedding(
     status.value = (
         f"{DATASET_LABELS['mnist']} pool available: {max_instances:,} samples. "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
-        "log attraction, weight_sum normalization, 1,000 epochs. "
+        "squared distance, log attraction, Bernoulli repulsion, "
+        "weight_sum normalization, 1,000 epochs. "
         "Click Fit embedding to run."
     )
 
@@ -147,22 +149,41 @@ def display_interactive_embedding(
     )
     repulsion_type = widgets.Dropdown(
         options=[
-            ("Bernoulli (log)", "bernoulli"),
-            ("Inverse distance (previous)", "inverse_distance"),
+            ("Log / Bernoulli", "bernoulli"),
+            ("Inverse distance", "inverse_distance"),
+            ("Logistic margin", "logistic"),
         ],
         value="bernoulli",
-        description="Repulsion force",
+        description="Repulsion dampening",
         style={"description_width": "initial"},
     )
-    attraction_type = widgets.Dropdown(
+    distance_type = widgets.Dropdown(
+        options=[("Squared Euclidean", "squared"), ("Euclidean", "euclidean")],
+        value="squared",
+        description="Distance",
+        style={"description_width": "initial"},
+    )
+    attraction_dampening = widgets.Dropdown(
         options=[
-            ("Log (current)", "log"),
-            ("Euclidean distance", "euclidean"),
-            ("Squared distance", "squared"),
-            ("Huber distance", "huber"),
+            ("Direct", "direct"),
+            ("Log", "log"),
+            ("Logistic margin", "logistic"),
+            ("Huber", "huber"),
         ],
         value="log",
-        description="Attraction loss",
+        description="Attraction dampening",
+        style={"description_width": "initial"},
+    )
+    logistic_margin = widgets.FloatSlider(
+        value=1.0, min=0.0, max=5.0, step=0.1,
+        description="Logistic margin",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    logistic_temperature = widgets.FloatSlider(
+        value=0.5, min=0.05, max=2.0, step=0.05,
+        description="Logistic temperature",
+        continuous_update=False,
         style={"description_width": "initial"},
     )
     negative_ratio = widgets.IntSlider(
@@ -205,12 +226,43 @@ def display_interactive_embedding(
     )
     output = widgets.Output()
 
+    def select_dataset(change) -> None:
+        selected = change["new"]
+        previous = active_dataset["name"]
+        fit_button.disabled = True
+        status.value = f"Loading {DATASET_LABELS[selected]} sample pool..."
+        try:
+            if selected not in pool_cache:
+                pool_cache[selected] = _load_balanced_pool(
+                    selected, max_pool_instances, random_state
+                )
+            active_dataset["name"] = selected
+            X_selected, _ = pool_cache[selected]
+            sample_count.max = len(X_selected)
+            sample_count.value = min(sample_count.value, len(X_selected))
+            status.value = (
+                f"{DATASET_LABELS[selected]} pool available: "
+                f"{len(X_selected):,} samples. Adjust controls and click Fit embedding."
+            )
+        except Exception:
+            status.value = f"Could not load {DATASET_LABELS[selected]}; see error details."
+            traceback.print_exc()
+            dataset.unobserve(select_dataset, names="value")
+            dataset.value = previous
+            dataset.observe(select_dataset, names="value")
+        finally:
+            fit_button.disabled = False
+
     def reset_sliders(_=None) -> None:
-        sample_count.value = min(1000, max_instances)
+        dataset.value = "mnist"
+        sample_count.value = min(1000, sample_count.max)
         n_msts.value = 10
         lambda_rep.value = 0.5
         repulsion_type.value = "bernoulli"
-        attraction_type.value = "log"
+        distance_type.value = "squared"
+        attraction_dampening.value = "log"
+        logistic_margin.value = 1.0
+        logistic_temperature.value = 0.5
         negative_ratio.value = 5
         compute_knn.value = False
         device.value = device_default
@@ -222,6 +274,7 @@ def display_interactive_embedding(
             clear_output(wait=True)
             try:
                 n_samples = sample_count.value
+                X_pool, labels_pool = pool_cache[active_dataset["name"]]
                 X = X_pool[:n_samples]
                 labels = labels_pool[:n_samples]
                 estimator = IteratedMinimumSpanningTreeEmbedder(
@@ -233,7 +286,10 @@ def display_interactive_embedding(
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
                     repulsion_type=repulsion_type.value,
-                    attraction_type=attraction_type.value,
+                    distance_type=distance_type.value,
+                    attraction_dampening=attraction_dampening.value,
+                    logistic_margin=logistic_margin.value,
+                    logistic_temperature=logistic_temperature.value,
                     random_state=random_state,
                     device=device.value,
                 )
@@ -253,6 +309,15 @@ def display_interactive_embedding(
                         cv=cv,
                     ).mean()
                     knn_title = f" · 5-NN 5-fold CV accuracy={knn_accuracy:.3f}"
+                logistic_title = ""
+                if (
+                    attraction_dampening.value == "logistic"
+                    or repulsion_type.value == "logistic"
+                ):
+                    logistic_title = (
+                        f" · logistic m={logistic_margin.value:.1f}, "
+                        f"τ={logistic_temperature.value:.2f}"
+                    )
 
                 fig, ax = plt.subplots(figsize=(8, 6))
                 points = ax.scatter(
@@ -268,15 +333,18 @@ def display_interactive_embedding(
                 )
                 ax.set(
                     title=(
-                        f"2D IMSTE · {n_samples:,} samples · "
+                        f"2D IMSTE · {DATASET_LABELS[active_dataset['name']]} · "
+                        f"{n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
-                        f"{attraction_type.value} attraction · weight_sum · "
-                        f"1,000 epochs{knn_title}"
+                        f"{distance_type.value} distance · "
+                        f"{attraction_dampening.value} attraction · "
+                        f"{repulsion_type.value} repulsion · weight_sum · "
+                        f"1,000 epochs{logistic_title}{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
                     ylabel="Embedding dimension 2",
                 )
-                fig.colorbar(points, ax=ax, ticks=range(10), label="Digit")
+                fig.colorbar(points, ax=ax, ticks=range(10), label="Class label")
                 fig.tight_layout()
                 display(fig)
                 plt.close(fig)
@@ -298,15 +366,18 @@ def display_interactive_embedding(
             finally:
                 fit_button.disabled = False
 
+    dataset.observe(select_dataset, names="value")
     fit_button.on_click(fit_and_display)
     reset_button.on_click(reset_sliders)
 
     controls = widgets.VBox(
         [
+            widgets.HBox([dataset]),
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([lambda_rep, negative_ratio]),
-            widgets.HBox([attraction_type]),
-            widgets.HBox([repulsion_type]),
+            widgets.HBox([distance_type]),
+            widgets.HBox([attraction_dampening, repulsion_type]),
+            widgets.HBox([logistic_margin, logistic_temperature]),
             widgets.HBox([compute_knn, device]),
         ]
     )
@@ -319,11 +390,15 @@ def display_interactive_embedding(
         "output": output,
         "status": status,
         "sliders": {
+            "dataset": dataset,
             "sample_count": sample_count,
             "n_msts": n_msts,
             "lambda_rep": lambda_rep,
-            "attraction_type": attraction_type,
+            "distance_type": distance_type,
+            "attraction_dampening": attraction_dampening,
             "repulsion_type": repulsion_type,
+            "logistic_margin": logistic_margin,
+            "logistic_temperature": logistic_temperature,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
             "device": device,

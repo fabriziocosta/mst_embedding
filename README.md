@@ -60,16 +60,14 @@ weight `1 / r`, so later trees contribute less.
 ### Optimize coordinates
 
 Each observation gets a trainable coordinate vector `y_i` in
-`n_components` dimensions. For a pair, let `t = sum_k (y_ik - y_jk) ** 2` be
-its squared Euclidean embedding distance. Define the pairwise edge probability
-`q(t) = 1 / (1 + t + epsilon)`. A positive graph edge uses the Bernoulli
-negative log-likelihood `-log(q) = log(1 + t + epsilon)`, multiplied by its
-MST-rank weight. For each positive-edge endpoint, the optimizer samples
-`negative_ratio` graph non-neighbors and applies the selected repulsion loss.
-The default `repulsion_type="bernoulli"` uses `-log(1 - q)`, equivalently
-`log(1 + 1 / (t + epsilon))`. Set `repulsion_type="inverse_distance"` to
-restore the earlier `1 / (1 + t + epsilon)` penalty. Negative losses are
-averaged without MST-rank weights. Adam minimizes the convex combination
+`n_components` dimensions. For a pair, let `t = sum_k (y_ik - y_jk) ** 2`.
+`distance_type="squared"` (the default) uses `z=t`; `"euclidean"` uses a
+smoothed Euclidean distance. Positive graph edges apply the selected
+`attraction_dampening` to `z`; sampled non-edges apply the selected
+`repulsion_type`. The defaults, `log` and `bernoulli`, retain the current
+pairwise probability losses. `inverse_distance` uses
+`1 / (1 + z + epsilon)`, while `logistic` uses a margin-based loss. Negative
+losses are averaged without MST-rank weights. Adam minimizes the convex combination
 `(1 - lambda_rep) * attraction + lambda_rep * repulsion`. Here `lambda_rep` is
 the repulsion share in `[0, 1]`;
 the attraction share is `1 - lambda_rep`. The default `0.5` gives equal weight
@@ -99,8 +97,9 @@ coordinates are optimized jointly for all training samples, `transform` returns
 the stored coordinates only for the exact training matrix in its original row
 order. It does not project unseen samples.
 
-The main parameters are `n_msts=10`, `attraction_type="log"`,
-`n_components=2`, `n_epochs=1000`,
+The main parameters are `n_msts=10`, `distance_type="squared"`,
+`attraction_dampening="log"`, `repulsion_type="bernoulli"`,
+`logistic_margin=1.0`, `logistic_temperature=0.5`, `n_components=2`, `n_epochs=1000`,
 `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Edge weights decay by MST rank as
@@ -114,11 +113,12 @@ selected backend is available as `estimator.device_` after fitting.
 
 Attraction is normalized by the sum of graph edge weights. This keeps its
 scale more consistent as additional low-weight MST ranks are added.
-Choose `attraction_type="log"` (the default), `"euclidean"`, `"squared"`, or
-`"huber"` to compare the current logarithmic penalty, Euclidean distance,
-squared Euclidean distance, or a Huber penalty on Euclidean distance. The
-Huber transition is at distance 1. A custom `attraction_loss_fn` overrides
-`attraction_type`.
+Choose `distance_type="euclidean"` or `"squared"`. Attraction dampening can
+be `"direct"`, `"log"`, `"logistic"`, or `"huber"`; repulsion can be
+`"bernoulli"`, `"inverse_distance"`, or `"logistic"`. Logistic margin and
+temperature apply to both logistic losses. The Huber transition is at 1 in
+the selected distance units. A custom `attraction_loss_fn` overrides the
+built-in attraction dampening.
 
 The attraction and repulsion losses can be replaced independently with
 `attraction_loss_fn` and `repulsion_loss_fn`. Each callable must return a scalar
@@ -138,7 +138,9 @@ embedding = IteratedMinimumSpanningTreeEmbedder(
 ).fit_transform(X)
 ```
 
-The built-in `log_attraction_loss`, `euclidean_attraction_loss`,
-`squared_distance_attraction_loss`, `huber_attraction_loss`,
-`bernoulli_repulsion_loss`, and `inverse_distance_repulsion_loss` functions are
-exported from `mst_embedding` for reuse or comparison.
+The built-in `log_attraction_loss`, `direct_attraction_loss`,
+`euclidean_attraction_loss`, `squared_distance_attraction_loss`,
+`huber_attraction_loss`, `logistic_attraction_loss`,
+`bernoulli_repulsion_loss`, `inverse_distance_repulsion_loss`, and
+`logistic_repulsion_loss` functions are exported from `mst_embedding` for
+reuse or comparison.

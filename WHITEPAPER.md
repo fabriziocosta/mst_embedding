@@ -100,11 +100,13 @@ $$
 d_{ij}^2=\sum_{k=1}^{q}(y_{ik}-y_{jk})^2.
 $$
 
-The default objective interprets embedded distance through a pairwise edge
-probability:
+Let $z_{ij}$ be the configured embedding distance value. With the default
+`distance_type="squared"`, $z_{ij}=d_{ij}^2$. With
+`distance_type="euclidean"`, $z_{ij}=\sqrt{d_{ij}^2+\epsilon}-\sqrt{\epsilon}$.
+The default logarithmic objective uses the pairwise edge probability:
 
 $$
-q_{ij}=\frac{1}{1+d_{ij}^2+\epsilon}.
+q_{ij}=\frac{1}{1+z_{ij}+\epsilon}.
 $$
 
 With the default `attraction_normalization="weight_sum"`, the attractive term is
@@ -114,7 +116,7 @@ L_{\mathrm{attr}}=
 \frac{1}{\sum_{(i,j)\in E}w_{ij}}\sum_{(i,j)\in E}
 w_{ij}\bigl[-\log(q_{ij})\bigr]
 =\frac{1}{\sum_{(i,j)\in E}w_{ij}}\sum_{(i,j)\in E}
-w_{ij}\log(1+d_{ij}^2+\epsilon).
+w_{ij}\log(1+z_{ij}+\epsilon).
 $$
 
 This is the Bernoulli negative log-likelihood for a positive edge. Minimizing
@@ -126,28 +128,30 @@ because more, lower-weight MST ranks were added. With minibatch optimization,
 the implementation scales each minibatch's weighted mean by the graph-wide
 ratio `|E| / sum(w)` to estimate this normalized objective.
 
-The built-in attraction can be selected with `attraction_type`. The default
-`"log"` uses the loss above. `"euclidean"` instead uses the smoothed direct
-distance
+The attraction dampening is selected with `attraction_dampening`. The default
+`"log"` uses the loss above. `"direct"` uses $z_{ij}$, and `"huber"` applies
+a Huber penalty to $z_{ij}$ with transition $\delta=1$. `"logistic"` uses
+
+$$
+\rho^+_{ij}=\operatorname{softplus}\left(\frac{z_{ij}-m}{\tau}\right)
+-\operatorname{softplus}\left(-\frac{m}{\tau}\right),
+$$
+
+where $m$ is `logistic_margin` and $\tau$ is `logistic_temperature`.
+The separate `distance_type` setting chooses Euclidean or squared Euclidean
+values. These two controls set the distance coordinate and positive-edge
+loss shape.
+
+For direct Euclidean distance, the smoothed distance value is
 
 $$
 \rho_{\mathrm{euclidean}}(d)=\sqrt{d^2+\epsilon}-\sqrt{\epsilon},
 $$
 
-while `"squared"` uses $\rho_{\mathrm{squared}}(d)=d^2$. `"huber"` applies a
-Huber penalty to the same smoothed distance $s=\rho_{\mathrm{euclidean}}(d)$,
-with transition $\delta=1$:
-
-$$
-\rho_{\mathrm{huber}}(s)=
-\begin{cases}
-\frac{1}{2}s^2 & s\leq 1,\\
-s-\frac{1}{2} & s>1.
-\end{cases}
-$$
-
-All variants use the same edge weights and weight-sum normalization. A custom
-`attraction_loss_fn` takes precedence over `attraction_type`.
+The Huber penalty uses $\rho(s)=\frac{1}{2}s^2$ for $s\leq1$ and
+$\rho(s)=s-\frac{1}{2}$ for $s>1$. All attraction variants use the same edge
+weights and weight-sum normalization. A custom `attraction_loss_fn` takes
+precedence over `attraction_dampening`.
 
 ### 4.2 Repulsion on sampled non-edges
 
@@ -166,19 +170,29 @@ is:
 
 $$
 L_{uv}^{-}=-\log(1-q_{uv})
-=\log\!\left(1+\frac{1}{d_{uv}^2+\epsilon}\right).
+=\log\!\left(1+\frac{1}{z_{uv}+\epsilon}\right).
 $$
+
+Here $z_{uv}$ uses the selected `distance_type` in the same way as for
+positive edges.
 
 Alternatively, `repulsion_type="inverse_distance"` selects the original
 penalty:
 
 $$
-L_{uv}^{-}=\frac{1}{1+d_{uv}^2+\epsilon}.
+L_{uv}^{-}=\frac{1}{1+z_{uv}+\epsilon}.
 $$
 
 This inverse-distance penalty gives a shallower response to close negatives
-than the Bernoulli log loss. The default is `repulsion_type="bernoulli"`.
-Either way, the repulsive term is the unweighted mean of losses over the
+than the Bernoulli log loss. `repulsion_type="logistic"` uses
+
+$$
+L_{uv}^{-}=\operatorname{softplus}\left(\frac{m-z_{uv}}{\tau}\right),
+$$
+
+with the same `logistic_margin` $m$ and `logistic_temperature` $\tau$ used by
+logistic attraction. The default is `repulsion_type="bernoulli"`. All three
+repulsion types use the unweighted mean of losses over the
 sampled set of negative pairs. The MST-rank weights are not applied to
 negative samples.
 For the Bernoulli choice, positive epsilon keeps both q and 1-q strictly
@@ -223,14 +237,17 @@ with a fixed inverse-rank weight for each edge.
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
 | `attraction_normalization` | `weight_sum` (fixed) | Attraction denominator: total edge weight |
-| `attraction_type` | `log` | Positive-edge penalty: `log`, `euclidean`, `squared`, or `huber` |
+| `distance_type` | `squared` | Distance value shared by attraction and repulsion: Euclidean or squared Euclidean |
+| `attraction_dampening` | `log` | Positive-edge shaping: direct, log, logistic, or Huber |
+| `logistic_margin` | 1.0 | Distance margin for logistic attraction and repulsion |
+| `logistic_temperature` | 0.5 | Softness of the logistic losses; must be positive |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
-| `repulsion_type` | `bernoulli` | Negative-pair penalty: Bernoulli log or original inverse distance |
+| `repulsion_type` | `bernoulli` | Negative-pair shaping: Bernoulli log, inverse distance, or logistic |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
 | `device` | `auto` | CPU or Apple MPS optimization backend |
