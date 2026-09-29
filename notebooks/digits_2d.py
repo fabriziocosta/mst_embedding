@@ -21,7 +21,7 @@ try:  # Notebook execution puts this directory directly on sys.path.
 except ModuleNotFoundError:  # Also support importing as notebooks.digits_2d.
     from .digits_sweep import load_mnist_data
     from .high_dim_mst_gallery import _load_kmnist, _load_openml, _stratified_sample
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 
 DATASET_LABELS = {

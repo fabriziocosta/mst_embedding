@@ -24,7 +24,7 @@ _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 
 def load_mnist_data(sample_size=2000, random_state=42):
@@ -184,7 +184,7 @@ def run_umap_comparisons(
     except ImportError as exc:
         raise ImportError(
             'UMAP comparison requires the notebook extra: '
-            'python -m pip install "mst-embedding[notebook]"'
+            'python -m pip install "imste[notebook]"'
         ) from exc
 
     if not configurations:

@@ -1,6 +1,6 @@
 # IMSTE: Iterated Minimum Spanning Tree Embedding
 
-`mst-embedding` provides IMSTE, a scikit-learn-compatible transformer that
+`imste` provides IMSTE, a scikit-learn-compatible transformer that
 learns an embedding from a union of edge-disjoint minimum spanning trees. It
 defaults to two dimensions and supports other output dimensions through `n_components`.
 The method has two stages: it builds a weighted graph from repeated MSTs, then
@@ -27,7 +27,7 @@ from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
 indices, _ = train_test_split(
@@ -86,7 +86,7 @@ for early stopping. The best validation checkpoint is restored, then
 predictions are returned in the embedding's original coordinate scale.
 
 ```python
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 mapper = IteratedMinimumSpanningTreeEmbedder(
     transform_method="mlp",
@@ -147,4 +147,4 @@ Attraction is normalized by the sum of graph edge weights. This keeps its
 scale more consistent as additional low-weight MST ranks are added.
 Logistic margin and temperature control the negative-pair loss. The built-in
 `log_attraction_loss` and `logistic_repulsion_loss` functions are exported from
-`mst_embedding` for reuse.
+`imste` for reuse.

@@ -213,7 +213,7 @@ not passed into the estimator's optimization.
 from sklearn.datasets import load_digits
 from sklearn.preprocessing import StandardScaler
 
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 digits = load_digits()
 X = StandardScaler().fit_transform(digits.data)

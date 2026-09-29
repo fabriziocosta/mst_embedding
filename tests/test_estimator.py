@@ -4,8 +4,8 @@ import torch
 from sklearn.base import clone
 from scipy.spatial.distance import cdist
 
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
-from mst_embedding._estimator import (
+from imste import IteratedMinimumSpanningTreeEmbedder
+from imste._estimator import (
     _iterated_mst_edges,
     _sample_negative_targets,
     log_attraction_loss,
@@ -130,7 +130,7 @@ def test_mlp_stops_after_patience_once_minimum_epochs_are_met(monkeypatch):
         def forward(self, inputs):
             return (self.output * 0).expand(inputs.shape[0], -1)
 
-    monkeypatch.setattr("mst_embedding._estimator._MLPProjector", ConstantMLP)
+    monkeypatch.setattr("imste._estimator._MLPProjector", ConstantMLP)
     estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=1,
         n_epochs=0,
@@ -228,7 +228,7 @@ def test_attraction_uses_global_weight_sum_scale(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "mst_embedding._estimator.log_attraction_loss", capture_attraction_weights
+        "imste._estimator.log_attraction_loss", capture_attraction_weights
     )
 
     estimator = IteratedMinimumSpanningTreeEmbedder(

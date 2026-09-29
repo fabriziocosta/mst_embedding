@@ -18,9 +18,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts the repository root on sys.path.
-    from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+    from imste import IteratedMinimumSpanningTreeEmbedder
 except ModuleNotFoundError:  # Also support importing as notebooks.high_dim_mst_gallery.
-    from ..mst_embedding import IteratedMinimumSpanningTreeEmbedder
+    from ..imste import IteratedMinimumSpanningTreeEmbedder
 
 
 def _stratified_sample(

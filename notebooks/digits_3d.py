@@ -20,7 +20,7 @@ try:  # Notebook execution puts this directory directly on sys.path.
     from digits_sweep import format_duration, load_mnist_data
 except ModuleNotFoundError:  # Also support importing as notebooks.digits_3d.
     from .digits_sweep import format_duration, load_mnist_data
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 
 def fit_and_plot_mst_3d(
