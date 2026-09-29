@@ -27,7 +27,7 @@ def fit_and_plot_mst_3d(
     X,
     labels,
     n_msts=30,
-    n_epochs=1000,
+    n_epochs=100,
     batch_size=4096,
     learning_rate=0.05,
     negative_ratio=5,
@@ -180,7 +180,7 @@ def display_interactive_mst_3d(
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
         f"Default selection: {initial_sample_count:,} samples, 30 MSTs with approximate FAMST, "
-        "1,000 epochs. Click Fit 3D embedding to run."
+        "100 epochs. Click Fit 3D embedding to run."
     )
 
     sample_count = widgets.IntSlider(
@@ -204,7 +204,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=1000, min=100, max=1000, step=100,
+        value=100, min=100, max=1000, step=100,
         description="Epochs", continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -275,7 +275,7 @@ def display_interactive_mst_3d(
         sample_count.value = min(1000, max_instances)
         n_msts.value = 30
         mst_method.value = "famst"
-        n_epochs.value = 1000
+        n_epochs.value = 100
         batch_size.value = 4096
         learning_rate.value = 0.05
         negative_ratio.value = 5

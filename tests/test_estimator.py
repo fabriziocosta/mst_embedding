@@ -224,6 +224,19 @@ def test_exact_graph_uses_euclidean_distances():
     assert set(estimator.graph_weights_) == {1.0, 0.5}
 
 
+def test_prim_ignores_famst_representative_count():
+    X = small_data()
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        n_msts=1,
+        n_epochs=0,
+        mst_method="prim",
+        mst_representatives_per_component=1,
+    ).fit(X)
+    expected, _ = _iterated_mst_edges(cdist(X, X, metric="euclidean"), 1)
+
+    np.testing.assert_array_equal(estimator.graph_edges_, expected)
+
+
 def test_representative_count_is_passed_to_mst_builder(monkeypatch):
     captured = {}
 

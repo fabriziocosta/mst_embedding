@@ -69,19 +69,17 @@ mapper = IteratedMinimumSpanningTreeEmbedder(
 embedding = mapper.fit_transform(X)
 ```
 
-FAMST starts with an approximate k-nearest-neighbor graph, adds and refines
-connections between disconnected components, then extracts edge-disjoint trees
-from that sparse candidate graph. It samples up to
+FAMST starts with an approximate k-nearest-neighbor graph. It samples up to
 `mst_representatives_per_component` points from each component, builds an exact
 MST over those representatives, and searches bridge candidates only for the
 unique component pairs crossed by that MST. The default representative cap is
-10. FAMST can increase the neighbor count when needed, up to
+10. It refines those connections and extracts edge-disjoint trees from the
+sparse candidate graph. FAMST can increase the neighbor count when needed, up to
 `mst_max_neighbors` (by default, four times `mst_neighbors`). The result is
 approximate and is not guaranteed to match the trees from the complete
 Euclidean graph. The sparse mode also samples negative pairs without allocating
-the core estimator's quadratic adjacency bit matrix.
-The implementation follows Almansoori and Telek's
-[FAMST paper](https://arxiv.org/abs/2507.14261).
+the core estimator's quadratic adjacency bit matrix. The implementation follows
+Almansoori and Telek's [FAMST paper](https://arxiv.org/abs/2507.14261).
 
 The labels are not passed to the estimator. Use them afterward to color or
 score a visualization if needed.
@@ -167,7 +165,7 @@ embedding and do not extend or re-optimize its graph.
 | --- | ---: | --- |
 | `n_msts` | `30` | Number of edge-disjoint spanning trees |
 | `n_components` | `2` | Embedding dimensions |
-| `n_epochs` | `1000` | Coordinate-optimization epochs |
+| `n_epochs` | `100` | Coordinate-optimization epochs |
 | `batch_size` | `4096` | Positive graph edges per optimization step |
 | `learning_rate` | `0.05` | Coordinate optimizer learning rate |
 | `negative_ratio` | `5` | Non-neighbors sampled per endpoint of each positive edge |

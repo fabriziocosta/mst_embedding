@@ -187,7 +187,7 @@ weight for each edge.
 | `logistic_margin` | 1.0 | Squared-distance margin for logistic repulsion |
 | `logistic_temperature` | 0.5 | Softness of the logistic repulsion; must be positive |
 | `n_components` | 2 | Number of output dimensions |
-| `n_epochs` | 1000 | Number of passes over the positive edges |
+| `n_epochs` | 100 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |
@@ -260,14 +260,16 @@ $$
 $$
 
 The default `mst_method="famst"` backend builds an approximate
-nearest-neighbor graph, connects and refines its components, then extracts
-edge-disjoint trees from the candidate graph. For a fixed neighbor count and a
-small number of ANN components, its graph storage grows approximately linearly
-with the number of rows. Its result is approximate and does not guarantee the
-same trees as the complete Euclidean graph. The implementation uses
-PyNNDescent and can increase the neighbor count, within `mst_max_neighbors`,
-when the candidate graph lacks enough edge-disjoint trees. This follows the
-FAMST approach by Almansoori and Telek (2025).
+nearest-neighbor graph. It samples up to `mst_representatives_per_component`
+points per ANN component, builds an exact MST over those representatives, and
+uses its cross-component edges to select unique component pairs for bridge
+search and refinement. It then extracts edge-disjoint trees from the candidate
+graph. For a fixed neighbor count and a small number of ANN components, its
+graph storage grows approximately linearly with the number of rows. Its result
+is approximate and does not guarantee the same trees as the complete Euclidean
+graph. The implementation uses PyNNDescent and can increase the neighbor count,
+within `mst_max_neighbors`, when the candidate graph lacks enough edge-disjoint
+trees. This follows the FAMST approach by Almansoori and Telek (2025).
 
 Optimization cost grows with the number of epochs, graph edges, negative ratio,
 and output dimension. Let m denote the negative ratio and q the output
