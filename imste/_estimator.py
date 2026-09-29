@@ -8,7 +8,6 @@ import time
 
 import numpy as np
 import torch
-from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
 
@@ -16,6 +15,8 @@ from .losses import (
     log_attraction_loss,
     logistic_repulsion_loss,
 )
+from .mst import build_mst_edges
+from .mst.prim import iterated_prim_distance_edges as _iterated_mst_edges
 
 
 def _positive_integer(name: str, value: object, *, allow_zero: bool = False) -> int:
@@ -94,70 +95,26 @@ def _sample_negative_targets(
     return targets
 
 
+def _sample_sparse_negative_targets(
+    rng: np.random.RandomState,
+    adjacency: list[set[int]],
+    negative_sources: np.ndarray,
+    n_samples: int,
+) -> np.ndarray:
+    """Rejection-sample non-neighbors without a quadratic bit matrix."""
+    targets = np.empty(negative_sources.size, dtype=np.intp)
+    for index, source_value in enumerate(negative_sources):
+        source = int(source_value)
+        target = int(rng.randint(n_samples))
+        while target == source or target in adjacency[source]:
+            target = int(rng.randint(n_samples))
+        targets[index] = target
+    return targets
+
+
 def _squared_euclidean_distance(delta: torch.Tensor) -> torch.Tensor:
     """Return squared Euclidean distances for row-wise coordinate differences."""
     return torch.sum(delta * delta, dim=1)
-
-
-def _iterated_mst_edges(
-    distances: np.ndarray,
-    n_msts: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return edge-disjoint MSTs, preserving zero-distance edges.
-
-    Dense Prim avoids treating zero-weight edges as missing, which is important
-    when the input contains duplicate samples.
-    """
-    n_samples = distances.shape[0]
-    available = np.full(
-        (n_samples, (n_samples + 7) // 8), 0xFF, dtype=np.uint8
-    )
-    sample_ids = np.arange(n_samples)
-    available[sample_ids, sample_ids >> 3] &= np.bitwise_not(
-        (1 << (sample_ids & 7)).astype(np.uint8)
-    )
-    edges: list[tuple[int, int]] = []
-    weights: list[float] = []
-
-    for rank in range(1, n_msts + 1):
-        in_tree = np.zeros(n_samples, dtype=bool)
-        best = np.full(n_samples, np.inf, dtype=np.float64)
-        parent = np.full(n_samples, -1, dtype=np.intp)
-        best[0] = 0.0
-
-        for _ in range(n_samples):
-            candidates = np.where(in_tree, np.inf, best)
-            node = int(np.argmin(candidates))
-            if not np.isfinite(candidates[node]):
-                raise ValueError(
-                    f"Could not construct MST {rank}: removing earlier trees left "
-                    "the available graph disconnected. Reduce n_msts."
-                )
-
-            in_tree[node] = True
-            if parent[node] != -1:
-                other = int(parent[node])
-                edges.append((other, node))
-                weights.append(1.0 / rank)
-                available[other, node >> 3] &= np.uint8(
-                    0xFF ^ (1 << (node & 7))
-                )
-                available[node, other >> 3] &= np.uint8(
-                    0xFF ^ (1 << (other & 7))
-                )
-
-            remaining = ~in_tree
-            available_row = np.unpackbits(
-                available[node], bitorder="little", count=n_samples
-            ).astype(bool)
-            connectable = remaining & available_row
-            improve = connectable & (distances[node] < best)
-            best[improve] = distances[node, improve]
-            parent[improve] = node
-
-    edge_array = np.asarray(edges, dtype=np.intp).reshape(-1, 2)
-    weight_array = np.asarray(weights, dtype=np.float64)
-    return edge_array, weight_array
 
 
 class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
@@ -194,6 +151,18 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     device : {'auto', 'cpu', 'mps'}, default='auto'
         Compute device. ``'auto'`` selects MPS on macOS for datasets with at
         least 2048 rows and CPU otherwise.
+    mst_method : {'prim', 'famst'}, default='prim'
+        ``'prim'`` constructs exact edge-disjoint trees using dense pairwise
+        distances. ``'famst'`` uses a sparse approximate-neighbor graph and
+        FAMST-style component connection and refinement; install ``imste[famst]``.
+    mst_neighbors : int, default=15
+        Initial approximate-neighbor count for ``mst_method='famst'``.
+    mst_inter_component_edges : int, default=5
+        FAMST candidate edges retained between each disconnected component pair.
+    mst_max_neighbors : int or None, default=None
+        Maximum approximate-neighbor count. ``None`` allows the FAMST builder to
+        increase the count up to four times ``mst_neighbors`` to obtain the
+        requested number of edge-disjoint trees.
     """
 
     def __init__(
@@ -210,6 +179,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         device: str = "auto",
         logistic_margin: float = 1.0,
         logistic_temperature: float = 0.5,
+        mst_method: str = "prim",
+        mst_neighbors: int = 15,
+        mst_inter_component_edges: int = 5,
+        mst_max_neighbors: int | None = None,
     ) -> None:
         self.n_msts = n_msts
         self.n_components = n_components
@@ -223,6 +196,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.device = device
         self.logistic_margin = logistic_margin
         self.logistic_temperature = logistic_temperature
+        self.mst_method = mst_method
+        self.mst_neighbors = mst_neighbors
+        self.mst_inter_component_edges = mst_inter_component_edges
+        self.mst_max_neighbors = mst_max_neighbors
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -239,6 +216,17 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         negative_ratio = _positive_integer(
             "negative_ratio", self.negative_ratio, allow_zero=True
         )
+        mst_neighbors = _positive_integer("mst_neighbors", self.mst_neighbors)
+        inter_component_edges = _positive_integer(
+            "mst_inter_component_edges", self.mst_inter_component_edges
+        )
+        max_neighbors = (
+            None
+            if self.mst_max_neighbors is None
+            else _positive_integer("mst_max_neighbors", self.mst_max_neighbors)
+        )
+        if self.mst_method not in {"prim", "famst"}:
+            raise ValueError("mst_method must be either 'prim' or 'famst'.")
         learning_rate = _finite_nonnegative(
             "learning_rate", self.learning_rate, strictly_positive=True
         )
@@ -258,14 +246,15 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         compute_dtype = torch.float32 if compute_device.type == "mps" else torch.float64
 
         graph_started = time.perf_counter()
-        distances = cdist(X_checked, X_checked, metric="euclidean")
-        if not np.isfinite(distances).all():
-            raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
-        np.fill_diagonal(distances, 0.0)
-        edges, edge_weights = _iterated_mst_edges(
-            distances, n_msts
+        edges, edge_weights = build_mst_edges(
+            X_checked,
+            n_msts=n_msts,
+            random_state=self.random_state,
+            method=self.mst_method,
+            neighbors=mst_neighbors,
+            inter_component_edges=inter_component_edges,
+            max_neighbors=max_neighbors,
         )
-        del distances
         self.graph_construction_time_ = time.perf_counter() - graph_started
 
         embedding_started = time.perf_counter()
@@ -291,25 +280,35 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             attraction_scale = len(edge_weights) / float(np.sum(edge_weights))
         edge_sources = edge_array[:, 0]
         edge_targets = edge_array[:, 1]
-        packed_adjacency = np.zeros(
-            (n_samples, (n_samples + 7) // 8), dtype=np.uint8
-        )
         sample_ids = np.arange(n_samples)
-        np.bitwise_or.at(
-            packed_adjacency,
-            (sample_ids, sample_ids >> 3),
-            (1 << (sample_ids & 7)).astype(np.uint8),
-        )
-        np.bitwise_or.at(
-            packed_adjacency,
-            (edge_sources, edge_targets >> 3),
-            (1 << (edge_targets & 7)).astype(np.uint8),
-        )
-        np.bitwise_or.at(
-            packed_adjacency,
-            (edge_targets, edge_sources >> 3),
-            (1 << (edge_sources & 7)).astype(np.uint8),
-        )
+        packed_adjacency = None
+        sparse_adjacency = None
+        if self.mst_method == "prim":
+            packed_adjacency = np.zeros(
+                (n_samples, (n_samples + 7) // 8), dtype=np.uint8
+            )
+            np.bitwise_or.at(
+                packed_adjacency,
+                (sample_ids, sample_ids >> 3),
+                (1 << (sample_ids & 7)).astype(np.uint8),
+            )
+            np.bitwise_or.at(
+                packed_adjacency,
+                (edge_sources, edge_targets >> 3),
+                (1 << (edge_targets & 7)).astype(np.uint8),
+            )
+            np.bitwise_or.at(
+                packed_adjacency,
+                (edge_targets, edge_sources >> 3),
+                (1 << (edge_sources & 7)).astype(np.uint8),
+            )
+        else:
+            sparse_adjacency = [set() for _ in range(n_samples)]
+            for source, target in zip(edge_sources, edge_targets):
+                sparse_adjacency[source].add(int(target))
+                sparse_adjacency[target].add(int(source))
+            for sample_id in sample_ids:
+                sparse_adjacency[sample_id].add(int(sample_id))
         node_degrees = np.bincount(
             np.concatenate((edge_sources, edge_targets)), minlength=n_samples
         )
@@ -340,9 +339,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 ]
                 if negative_ratio and eligible_sources.size:
                     negative_sources = np.repeat(eligible_sources, negative_ratio)
-                    negative_targets = _sample_negative_targets(
-                        rng, packed_adjacency, negative_sources, n_samples
-                    )
+                    if packed_adjacency is not None:
+                        negative_targets = _sample_negative_targets(
+                            rng, packed_adjacency, negative_sources, n_samples
+                        )
+                    else:
+                        negative_targets = _sample_sparse_negative_targets(
+                            rng, sparse_adjacency, negative_sources, n_samples
+                        )
                     ni = torch.as_tensor(
                         negative_sources, dtype=torch.long, device=compute_device
                     )

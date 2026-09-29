@@ -233,8 +233,8 @@ absolute units.
 
 ## 7. Computational cost
 
-The pairwise distance matrix requires quadratic memory in the number of
-samples:
+The default exact `mst_method="prim"` backend constructs a pairwise distance
+matrix requiring quadratic memory in the number of samples:
 
 $$
 O(n^2)
@@ -258,6 +258,16 @@ When all requested trees can be constructed, the graph contains:
 $$
 |E|=R(n-1)
 $$
+
+The optional `mst_method="famst"` backend instead builds an approximate
+nearest-neighbor graph, connects and refines its components, then extracts
+edge-disjoint trees from the candidate graph. For a fixed neighbor count and a
+small number of ANN components, its graph storage grows approximately linearly
+with the number of rows. Its result is approximate and does not guarantee the
+same trees as the complete Euclidean graph. The implementation uses
+PyNNDescent and can increase the neighbor count, within `mst_max_neighbors`,
+when the candidate graph lacks enough edge-disjoint trees. This follows the
+FAMST approach by Almansoori and Telek (2025).
 
 Optimization cost grows with the number of epochs, graph edges, negative ratio,
 and output dimension. Let m denote the negative ratio and q the output
@@ -292,8 +302,11 @@ embedding algorithm described here.
 
 - Poor feature scaling can cause some dimensions to dominate Euclidean distances
   and produce a poor graph.
-- Dense pairwise distances limit practical sample counts and require quadratic
-  memory.
+- The exact Prim backend uses dense pairwise distances and therefore limits
+  practical sample counts through quadratic time and memory.
+- The FAMST backend is approximate; quality depends on ANN recall and the
+  candidate graph may fail to contain the requested number of edge-disjoint
+  spanning trees under its configured neighbor cap.
 - Repeated MSTs may become impossible before the requested rank because
   previously selected edges can disconnect the remaining graph.
 - The embedding is stochastic and non-convex. A fixed seed supports
@@ -314,4 +327,6 @@ spanning trees and learns low-dimensional coordinates by balancing attraction
 along graph edges against sampled repulsion between graph non-neighbors. The
 approach is compact and easy to inspect, with its main tradeoff being the
 quadratic cost of dense graph construction. It is best treated as an
-exploratory embedding for appropriately scaled, manageable datasets.
+exploratory embedding. Use exact Prim for smaller datasets where exact trees
+matter, or FAMST when sparse approximate trees are an acceptable tradeoff for
+larger datasets.

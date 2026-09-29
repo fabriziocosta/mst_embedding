@@ -23,6 +23,13 @@ For notebooks, install the optional plotting and widget dependencies:
 python -m pip install ".[notebook]"
 ```
 
+For the sparse approximate FAMST graph builder, install its optional ANN
+dependency:
+
+```bash
+python -m pip install ".[famst]"
+```
+
 ## Quick start
 
 IMSTE uses Euclidean distances to build its graph. Scale features first when
@@ -51,6 +58,29 @@ embedding = mapper.fit_transform(X)
 print(embedding.shape)  # (500, 2)
 ```
 
+For larger datasets, choose the sparse approximate builder instead:
+
+```python
+mapper = IteratedMinimumSpanningTreeEmbedder(
+    n_msts=5,
+    mst_method="famst",
+    mst_neighbors=15,
+    mst_inter_component_edges=5,
+    random_state=42,
+)
+embedding = mapper.fit_transform(X)
+```
+
+FAMST starts with an approximate k-nearest-neighbor graph, adds and refines
+connections between disconnected components, then extracts edge-disjoint trees
+from that sparse candidate graph. It can increase the neighbor count when
+needed, up to `mst_max_neighbors` (by default, four times `mst_neighbors`). The
+result is approximate and is not guaranteed to match the trees from the
+complete Euclidean graph. The sparse mode also samples negative pairs without
+allocating the core estimator's quadratic adjacency bit matrix. Install
+`imste[famst]` to use this backend. The implementation follows Almansoori and
+Telek's [FAMST paper](https://arxiv.org/abs/2507.14261).
+
 The labels are not passed to the estimator. Use them afterward to color or
 score a visualization if needed.
 
@@ -75,9 +105,9 @@ attraction, `log1p(d² + epsilon)`. Sampled non-edges use logistic repulsion,
 weight. Negative losses use an unweighted mean. Each positive edge contributes
 `negative_ratio` sampled non-neighbors from each endpoint.
 
-The graph is exact and dense pairwise distances are computed, so graph
-construction uses quadratic time and memory in the number of samples. For
-larger datasets, start with a subset and increase its size as needed.
+The default `mst_method="prim"` computes exact edge-disjoint trees from dense
+pairwise distances, so it uses quadratic time and memory in the number of
+samples. For larger datasets, select the sparse approximate FAMST builder.
 
 ## Choose how to transform rows
 
@@ -144,6 +174,10 @@ embedding and do not extend or re-optimize its graph.
 | `epsilon` | `1e-4` | Smoothing for the logarithmic attraction |
 | `random_state` | `42` | Seed for initialization, shuffling, and sampling |
 | `device` | `"auto"` | `"cpu"`, `"mps"`, or automatic selection |
+| `mst_method` | `"prim"` | Exact dense `"prim"` or sparse approximate `"famst"` |
+| `mst_neighbors` | `15` | Initial ANN neighbors for FAMST |
+| `mst_inter_component_edges` | `5` | Candidate connections per FAMST component pair |
+| `mst_max_neighbors` | `None` | FAMST neighbor cap; defaults to four times `mst_neighbors` |
 
 For `device="auto"`, macOS uses PyTorch MPS for datasets with at least 2,048
 rows; smaller datasets use the CPU. Other systems use the CPU. The selected
@@ -167,6 +201,8 @@ optimization by passing an `IteratedMinimumSpanningTreeEmbedder` as `embedder`.
 
 ## Notebooks
 
+- [MST scaling benchmark](notebooks/mst_scaling_benchmark.ipynb): compare exact
+  Prim with approximate FAMST graph construction over increasing dataset sizes.
 - [Interactive 2D embedding](notebooks/digits_2d_interactive.ipynb): choose a
   dataset, fit settings, and optionally compare MLP predictions with the
   optimized coordinates.
