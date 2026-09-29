@@ -26,8 +26,8 @@ from imste import IteratedMinimumSpanningTreeEmbedder
 def fit_and_plot_mst_3d(
     X,
     labels,
-    n_msts=30,
-    n_epochs=100,
+    n_msts=15,
+    n_epochs=200,
     batch_size=4096,
     learning_rate=0.05,
     negative_ratio=5,
@@ -179,8 +179,8 @@ def display_interactive_mst_3d(
     minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Default selection: {initial_sample_count:,} samples, 30 MSTs with approximate FAMST, "
-        "100 epochs. Click Fit 3D embedding to run."
+        f"Default selection: {initial_sample_count:,} samples, 15 MSTs with approximate FAMST, "
+        "200 epochs. Click Fit 3D embedding to run."
     )
 
     sample_count = widgets.IntSlider(
@@ -193,7 +193,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_msts = widgets.IntSlider(
-        value=30, min=1, max=64, step=1,
+        value=15, min=1, max=64, step=1,
         description="MSTs", continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -204,7 +204,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=100, min=100, max=1000, step=100,
+        value=200, min=100, max=1000, step=100,
         description="Epochs", continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -273,9 +273,9 @@ def display_interactive_mst_3d(
 
     def reset_sliders(_=None):
         sample_count.value = min(1000, max_instances)
-        n_msts.value = 30
+        n_msts.value = 15
         mst_method.value = "famst"
-        n_epochs.value = 100
+        n_epochs.value = 200
         batch_size.value = 4096
         learning_rate.value = 0.05
         negative_ratio.value = 5

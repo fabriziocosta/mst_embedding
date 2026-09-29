@@ -123,10 +123,10 @@ def display_interactive_embedding(
         f"{DATASET_LABELS['mnist']} pool available: {len(X_pool):,} samples "
         f"(up to {max_training_instances:,} training rows, with remaining rows "
         "available for novel predictions). "
-        f"Default selection: {initial_sample_count:,} samples, 30 MSTs with "
+        f"Default selection: {initial_sample_count:,} samples, 15 MSTs with "
         "approximate FAMST, "
         "squared distance, log attraction, logistic repulsion, "
-        "weight_sum normalization, 100 epochs, and an 8,192 embedding batch. "
+        "weight_sum normalization, 200 epochs, and an 8,192 embedding batch. "
         "Click Fit embedding to run."
     )
 
@@ -149,7 +149,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=100,
+        value=200,
         min=50,
         max=1000,
         step=50,
@@ -158,7 +158,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     n_msts = widgets.IntSlider(
-        value=30,
+        value=15,
         min=1,
         max=64,
         step=1,
@@ -452,7 +452,7 @@ def display_interactive_embedding(
         projection_output.clear_output(wait=True)
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
-        n_msts.value = 30
+        n_msts.value = 15
         mst_method.value = "famst"
         mst_max_neighbors.value = 120
         lambda_rep.value = 0.5
@@ -461,7 +461,7 @@ def display_interactive_embedding(
         negative_ratio.value = 5
         compute_knn.value = False
         batch_size.value = 8192
-        n_epochs.value = 100
+        n_epochs.value = 200
         embedding_type.value = "transductive"
         mlp_n_layers.value = 6
         mlp_layer_size.value = 128

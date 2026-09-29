@@ -163,9 +163,9 @@ embedding and do not extend or re-optimize its graph.
 
 | Parameter | Default | Meaning |
 | --- | ---: | --- |
-| `n_msts` | `30` | Number of edge-disjoint spanning trees |
+| `n_msts` | `15` | Number of edge-disjoint spanning trees |
 | `n_components` | `2` | Embedding dimensions |
-| `n_epochs` | `100` | Coordinate-optimization epochs |
+| `n_epochs` | `200` | Coordinate-optimization epochs |
 | `batch_size` | `4096` | Positive graph edges per optimization step |
 | `learning_rate` | `0.05` | Coordinate optimizer learning rate |
 | `negative_ratio` | `5` | Non-neighbors sampled per endpoint of each positive edge |

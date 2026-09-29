@@ -183,11 +183,11 @@ weight for each edge.
 
 | Parameter | Default | Role |
 | --- | ---: | --- |
-| `n_msts` | 10 | Number of edge-disjoint MSTs |
+| `n_msts` | 15 | Number of edge-disjoint MSTs |
 | `logistic_margin` | 1.0 | Squared-distance margin for logistic repulsion |
 | `logistic_temperature` | 0.5 | Softness of the logistic repulsion; must be positive |
 | `n_components` | 2 | Number of output dimensions |
-| `n_epochs` | 100 | Number of passes over the positive edges |
+| `n_epochs` | 200 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |

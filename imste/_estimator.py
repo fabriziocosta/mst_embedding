@@ -152,11 +152,11 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    n_msts : int, default=30
+    n_msts : int, default=15
         Number of edge-disjoint minimum spanning trees to construct.
     n_components : int, default=2
         Number of embedding coordinates per sample.
-    n_epochs : int, default=100
+    n_epochs : int, default=200
         Number of optimization epochs.
     batch_size : int, default=4096
         Number of positive graph edges per optimization step.
@@ -206,9 +206,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     def __init__(
         self,
-        n_msts: int = 30,
+        n_msts: int = 15,
         n_components: int = 2,
-        n_epochs: int = 100,
+        n_epochs: int = 200,
         batch_size: int = 4096,
         learning_rate: float = 0.05,
         negative_ratio: int = 5,
