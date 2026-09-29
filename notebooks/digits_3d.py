@@ -26,7 +26,7 @@ from imste import IteratedMinimumSpanningTreeEmbedder
 def fit_and_plot_mst_3d(
     X,
     labels,
-    n_msts=10,
+    n_msts=30,
     n_epochs=1000,
     batch_size=4096,
     learning_rate=0.05,
@@ -35,7 +35,7 @@ def fit_and_plot_mst_3d(
     epsilon=1e-4,
     random_state=42,
     device="auto",
-    mst_method="prim",
+    mst_method="famst",
     trustworthiness_neighbors=10,
 ):
     """Fit one 3D IMSTE embedding and return its scores and Plotly figure."""
@@ -179,7 +179,7 @@ def display_interactive_mst_3d(
     minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Default selection: {initial_sample_count:,} samples, 10 MSTs with exact Prim, "
+        f"Default selection: {initial_sample_count:,} samples, 30 MSTs with approximate FAMST, "
         "1,000 epochs. Click Fit 3D embedding to run."
     )
 
@@ -193,13 +193,13 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_msts = widgets.IntSlider(
-        value=10, min=1, max=20, step=1,
+        value=30, min=1, max=64, step=1,
         description="MSTs", continuous_update=False,
         style={"description_width": "initial"},
     )
     mst_method = widgets.Dropdown(
-        options=[("Prim (exact)", "prim"), ("FAMST (approximate)", "famst")],
-        value="prim",
+        options=[("FAMST (approximate)", "famst"), ("Prim (exact)", "prim")],
+        value="famst",
         description="MST builder",
         style={"description_width": "initial"},
     )
@@ -273,8 +273,8 @@ def display_interactive_mst_3d(
 
     def reset_sliders(_=None):
         sample_count.value = min(1000, max_instances)
-        n_msts.value = 10
-        mst_method.value = "prim"
+        n_msts.value = 30
+        mst_method.value = "famst"
         n_epochs.value = 1000
         batch_size.value = 4096
         learning_rate.value = 0.05

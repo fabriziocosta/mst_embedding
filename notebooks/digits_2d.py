@@ -123,8 +123,8 @@ def display_interactive_embedding(
         f"{DATASET_LABELS['mnist']} pool available: {len(X_pool):,} samples "
         f"(up to {max_training_instances:,} training rows, with remaining rows "
         "available for novel predictions). "
-        f"Default selection: {initial_sample_count:,} samples, 10 MSTs with "
-        "exact Prim, "
+        f"Default selection: {initial_sample_count:,} samples, 30 MSTs with "
+        "approximate FAMST, "
         "squared distance, log attraction, logistic repulsion, "
         "weight_sum normalization, 100 epochs, and an 8,192 embedding batch. "
         "Click Fit embedding to run."
@@ -158,7 +158,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     n_msts = widgets.IntSlider(
-        value=10,
+        value=30,
         min=1,
         max=64,
         step=1,
@@ -167,8 +167,8 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     mst_method = widgets.Dropdown(
-        options=[("Prim (exact)", "prim"), ("FAMST (approximate)", "famst")],
-        value="prim",
+        options=[("FAMST (approximate)", "famst"), ("Prim (exact)", "prim")],
+        value="famst",
         description="MST builder",
         style={"description_width": "initial"},
     )
@@ -452,8 +452,8 @@ def display_interactive_embedding(
         projection_output.clear_output(wait=True)
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
-        n_msts.value = 10
-        mst_method.value = "prim"
+        n_msts.value = 30
+        mst_method.value = "famst"
         mst_max_neighbors.value = 120
         lambda_rep.value = 0.5
         logistic_margin.value = 1.0

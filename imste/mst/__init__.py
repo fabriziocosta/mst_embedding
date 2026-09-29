@@ -18,6 +18,7 @@ def build_mst_edges(
     neighbors: int,
     inter_component_edges: int,
     max_neighbors: int | None,
+    representatives_per_component: int = 10,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Dispatch MST construction to the selected backend."""
@@ -34,6 +35,7 @@ def build_mst_edges(
             inter_component_edges,
             max_neighbors,
             progress_callback,
+            representatives_per_component,
         )
     raise ValueError("mst_method must be either 'prim' or 'famst'.")
 

@@ -23,12 +23,9 @@ For notebooks, install the optional plotting and widget dependencies:
 python -m pip install ".[notebook]"
 ```
 
-For the sparse approximate FAMST graph builder, install its optional ANN
-dependency:
-
-```bash
-python -m pip install ".[famst]"
-```
+The default sparse approximate FAMST graph builder uses PyNNDescent, which is
+installed with the package. To use only the exact Prim builder, select
+`mst_method="prim"`.
 
 ## Quick start
 
@@ -58,7 +55,8 @@ embedding = mapper.fit_transform(X)
 print(embedding.shape)  # (500, 2)
 ```
 
-For larger datasets, choose the sparse approximate builder instead:
+For larger datasets, FAMST is the default sparse approximate builder. To use
+the exact Prim builder instead, set `mst_method="prim"`:
 
 ```python
 mapper = IteratedMinimumSpanningTreeEmbedder(
@@ -73,13 +71,17 @@ embedding = mapper.fit_transform(X)
 
 FAMST starts with an approximate k-nearest-neighbor graph, adds and refines
 connections between disconnected components, then extracts edge-disjoint trees
-from that sparse candidate graph. It can increase the neighbor count when
-needed, up to `mst_max_neighbors` (by default, four times `mst_neighbors`). The
-result is approximate and is not guaranteed to match the trees from the
-complete Euclidean graph. The sparse mode also samples negative pairs without
-allocating the core estimator's quadratic adjacency bit matrix. Install
-`imste[famst]` to use this backend. The implementation follows Almansoori and
-Telek's [FAMST paper](https://arxiv.org/abs/2507.14261).
+from that sparse candidate graph. It samples up to
+`mst_representatives_per_component` points from each component, builds an exact
+MST over those representatives, and searches bridge candidates only for the
+unique component pairs crossed by that MST. The default representative cap is
+10. FAMST can increase the neighbor count when needed, up to
+`mst_max_neighbors` (by default, four times `mst_neighbors`). The result is
+approximate and is not guaranteed to match the trees from the complete
+Euclidean graph. The sparse mode also samples negative pairs without allocating
+the core estimator's quadratic adjacency bit matrix.
+The implementation follows Almansoori and Telek's
+[FAMST paper](https://arxiv.org/abs/2507.14261).
 
 The labels are not passed to the estimator. Use them afterward to color or
 score a visualization if needed.
@@ -105,9 +107,10 @@ attraction, `log1p(d² + epsilon)`. Sampled non-edges use logistic repulsion,
 weight. Negative losses use an unweighted mean. Each positive edge contributes
 `negative_ratio` sampled non-neighbors from each endpoint.
 
-The default `mst_method="prim"` computes exact edge-disjoint trees from dense
-pairwise distances, so it uses quadratic time and memory in the number of
-samples. For larger datasets, select the sparse approximate FAMST builder.
+The default `mst_method="famst"` builds an approximate sparse graph. It can
+increase the neighbor count as needed, subject to `mst_max_neighbors`. Select
+`mst_method="prim"` for exact edge-disjoint trees from dense pairwise
+distances, which use quadratic time and memory in the number of samples.
 
 ## Choose how to transform rows
 
@@ -162,7 +165,7 @@ embedding and do not extend or re-optimize its graph.
 
 | Parameter | Default | Meaning |
 | --- | ---: | --- |
-| `n_msts` | `10` | Number of edge-disjoint spanning trees |
+| `n_msts` | `30` | Number of edge-disjoint spanning trees |
 | `n_components` | `2` | Embedding dimensions |
 | `n_epochs` | `1000` | Coordinate-optimization epochs |
 | `batch_size` | `4096` | Positive graph edges per optimization step |
@@ -174,9 +177,10 @@ embedding and do not extend or re-optimize its graph.
 | `epsilon` | `1e-4` | Smoothing for the logarithmic attraction |
 | `random_state` | `42` | Seed for initialization, shuffling, and sampling |
 | `device` | `"auto"` | `"cpu"`, `"mps"`, or automatic selection |
-| `mst_method` | `"prim"` | Exact dense `"prim"` or sparse approximate `"famst"` |
+| `mst_method` | `"famst"` | Sparse approximate `"famst"` or exact dense `"prim"` |
 | `mst_neighbors` | `15` | Initial ANN neighbors for FAMST |
 | `mst_inter_component_edges` | `5` | Candidate connections per FAMST component pair |
+| `mst_representatives_per_component` | `10` | Maximum representatives per component for selecting FAMST bridge pairs |
 | `mst_max_neighbors` | `None` | FAMST neighbor cap; defaults to four times `mst_neighbors` |
 
 For `device="auto"`, macOS uses PyTorch MPS for datasets with at least 2,048

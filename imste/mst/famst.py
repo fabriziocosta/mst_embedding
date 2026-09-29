@@ -65,6 +65,72 @@ def _distance(X: np.ndarray, left: int, right: int) -> float:
     return value
 
 
+def _sample_component_representatives(
+    groups: list[np.ndarray],
+    max_per_component: int,
+    rng: np.random.RandomState,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sample a bounded, reproducible set of points from each component."""
+    representative_points: list[np.ndarray] = []
+    representative_components: list[np.ndarray] = []
+    for component, points in enumerate(groups):
+        if len(points) > max_per_component:
+            selected = np.sort(
+                rng.choice(points, size=max_per_component, replace=False)
+            )
+        else:
+            selected = points
+        representative_points.append(selected)
+        representative_components.append(
+            np.full(len(selected), component, dtype=np.intp)
+        )
+    return (
+        np.concatenate(representative_points),
+        np.concatenate(representative_components),
+    )
+
+
+def _representative_component_pairs(
+    X: np.ndarray,
+    groups: list[np.ndarray],
+    max_per_component: int,
+    rng: np.random.RandomState,
+) -> list[tuple[int, int]]:
+    """Return unique component pairs crossed by the representative MST.
+
+    Prim's algorithm computes the exact Euclidean MST in quadratic time and
+    linear auxiliary memory, without constructing a dense distance matrix.
+    """
+    points, components = _sample_component_representatives(
+        groups, max_per_component, rng
+    )
+    n_representatives = len(points)
+    selected = np.zeros(n_representatives, dtype=bool)
+    best_distances = np.full(n_representatives, np.inf, dtype=np.float64)
+    parents = np.full(n_representatives, -1, dtype=np.intp)
+    best_distances[0] = 0.0
+    component_pairs: set[tuple[int, int]] = set()
+
+    for _ in range(n_representatives):
+        current = int(np.argmin(np.where(selected, np.inf, best_distances)))
+        if not np.isfinite(best_distances[current]):
+            raise ValueError("Could not construct an MST over component representatives.")
+        selected[current] = True
+        parent = int(parents[current])
+        if parent >= 0 and components[current] != components[parent]:
+            left = int(components[current])
+            right = int(components[parent])
+            component_pairs.add((min(left, right), max(left, right)))
+
+        for candidate in np.flatnonzero(~selected):
+            distance = _distance(X, int(points[current]), int(points[candidate]))
+            if distance < best_distances[candidate]:
+                best_distances[candidate] = distance
+                parents[candidate] = current
+
+    return sorted(component_pairs)
+
+
 def _ann_edges(
     X: np.ndarray,
     neighbors: int,
@@ -103,6 +169,7 @@ def _connect_components(
     edges: dict[tuple[int, int], float],
     n_candidates: int,
     rng: np.random.RandomState,
+    representatives_per_component: int = 10,
 ) -> tuple[list[tuple[int, int, int, int]], np.ndarray]:
     """Add randomized inter-component candidates and refine locally.
 
@@ -113,20 +180,22 @@ def _connect_components(
         return [], labels
 
     bridges: list[tuple[int, int, int, int]] = []
-    for left_component in range(len(groups)):
+    component_pairs = _representative_component_pairs(
+        X, groups, representatives_per_component, rng
+    )
+    for left_component, right_component in component_pairs:
         left_points = groups[left_component]
-        for right_component in range(left_component + 1, len(groups)):
-            right_points = groups[right_component]
-            candidates: dict[tuple[int, int], float] = {}
-            for _ in range(n_candidates * n_candidates):
-                left = int(rng.choice(left_points))
-                right = int(rng.choice(right_points))
-                candidates[(left, right)] = _distance(X, left, right)
-            best = sorted(candidates, key=candidates.__getitem__)[:n_candidates]
-            bridges.extend(
-                (left, right, left_component, right_component)
-                for left, right in best
-            )
+        right_points = groups[right_component]
+        candidates: dict[tuple[int, int], float] = {}
+        for _ in range(n_candidates * n_candidates):
+            left = int(rng.choice(left_points))
+            right = int(rng.choice(right_points))
+            candidates[(left, right)] = _distance(X, left, right)
+        best = sorted(candidates, key=candidates.__getitem__)[:n_candidates]
+        bridges.extend(
+            (left, right, left_component, right_component)
+            for left, right in best
+        )
 
     neighbors_by_node: list[list[int]] = [[] for _ in range(len(X))]
     for left, right in edges:
@@ -210,6 +279,7 @@ def iterated_famst_edges(
     inter_component_edges: int,
     max_neighbors: int | None,
     progress_callback: ProgressCallback | None = None,
+    representatives_per_component: int = 10,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build approximate edge-disjoint trees from an adaptive sparse graph."""
     n_samples = len(X)
@@ -248,7 +318,13 @@ def iterated_famst_edges(
             progress_callback(0, n_msts, detail)
         seed = int(rng.randint(0, np.iinfo(np.int32).max))
         candidate_edges = _ann_edges(X, current_neighbors, seed)
-        _connect_components(X, candidate_edges, inter_component_edges, rng)
+        _connect_components(
+            X,
+            candidate_edges,
+            inter_component_edges,
+            rng,
+            representatives_per_component,
+        )
         trees = _kruskal_edge_disjoint_trees(
             n_samples,
             candidate_edges,

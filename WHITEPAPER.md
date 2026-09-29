@@ -233,8 +233,8 @@ absolute units.
 
 ## 7. Computational cost
 
-The default exact `mst_method="prim"` backend constructs a pairwise distance
-matrix requiring quadratic memory in the number of samples:
+The exact `mst_method="prim"` backend constructs a pairwise distance matrix
+requiring quadratic memory in the number of samples:
 
 $$
 O(n^2)
@@ -259,7 +259,7 @@ $$
 |E|=R(n-1)
 $$
 
-The optional `mst_method="famst"` backend instead builds an approximate
+The default `mst_method="famst"` backend builds an approximate
 nearest-neighbor graph, connects and refines its components, then extracts
 edge-disjoint trees from the candidate graph. For a fixed neighbor count and a
 small number of ANN components, its graph storage grows approximately linearly

@@ -152,7 +152,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    n_msts : int, default=10
+    n_msts : int, default=30
         Number of edge-disjoint minimum spanning trees to construct.
     n_components : int, default=2
         Number of embedding coordinates per sample.
@@ -177,16 +177,20 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     device : {'auto', 'cpu', 'mps'}, default='auto'
         Compute device. ``'auto'`` selects MPS on macOS for datasets with at
         least 2048 rows and CPU otherwise.
-    mst_method : {'prim', 'famst'}, default='prim'
+    mst_method : {'prim', 'famst'}, default='famst'
         ``'prim'`` constructs exact edge-disjoint trees using dense pairwise
         distances. ``'famst'`` uses a sparse approximate-neighbor graph and
-        FAMST-style component connection and refinement; install ``imste[famst]``.
+        FAMST-style component connection and refinement; uses PyNNDescent.
     mst_neighbors : int, default=15
         Minimum initial approximate-neighbor count for ``mst_method='famst'``.
         FAMST targets the larger of this value and ``2 * n_msts``, subject to
         ``mst_max_neighbors``.
     mst_inter_component_edges : int, default=5
-        FAMST candidate edges retained between each disconnected component pair.
+        FAMST candidate edges retained between each component pair selected by
+        the representative MST.
+    mst_representatives_per_component : int, default=10
+        Maximum points sampled from each ANN component to select bridge-search
+        component pairs with a representative MST.
     mst_max_neighbors : int or None, default=None
         Maximum approximate-neighbor count. ``None`` allows the FAMST builder to
         increase the count up to four times its starting neighbor count to obtain
@@ -202,7 +206,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     def __init__(
         self,
-        n_msts: int = 10,
+        n_msts: int = 30,
         n_components: int = 2,
         n_epochs: int = 1000,
         batch_size: int = 4096,
@@ -214,12 +218,13 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         device: str = "auto",
         logistic_margin: float = 1.0,
         logistic_temperature: float = 0.5,
-        mst_method: str = "prim",
+        mst_method: str = "famst",
         mst_neighbors: int = 15,
         mst_inter_component_edges: int = 5,
         mst_max_neighbors: int | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         mst_progress_callback: Callable[[int, int, str], None] | None = None,
+        mst_representatives_per_component: int = 10,
     ) -> None:
         self.n_msts = n_msts
         self.n_components = n_components
@@ -239,6 +244,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.mst_max_neighbors = mst_max_neighbors
         self.progress_callback = progress_callback
         self.mst_progress_callback = mst_progress_callback
+        self.mst_representatives_per_component = mst_representatives_per_component
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -258,6 +264,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         mst_neighbors = _positive_integer("mst_neighbors", self.mst_neighbors)
         inter_component_edges = _positive_integer(
             "mst_inter_component_edges", self.mst_inter_component_edges
+        )
+        representatives_per_component = _positive_integer(
+            "mst_representatives_per_component",
+            self.mst_representatives_per_component,
         )
         max_neighbors = (
             None
@@ -293,6 +303,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             neighbors=mst_neighbors,
             inter_component_edges=inter_component_edges,
             max_neighbors=max_neighbors,
+            representatives_per_component=representatives_per_component,
             progress_callback=self.mst_progress_callback,
         )
         self.graph_construction_time_ = time.perf_counter() - graph_started

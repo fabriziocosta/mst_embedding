@@ -170,7 +170,7 @@ def _default_device() -> str:
 def run_high_dim_mst_gallery(
     *,
     max_samples: int = 1000,
-    n_msts: int = 10,
+    n_msts: int = 30,
     n_epochs: int = 1000,
     batch_size: int = 4096,
     negative_ratio: int = 5,

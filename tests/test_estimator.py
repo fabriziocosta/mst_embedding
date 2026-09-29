@@ -33,6 +33,7 @@ def test_sklearn_api_and_training_transform():
     np.testing.assert_array_equal(estimator.transform(X), embedding)
     assert estimator.n_features_in_ == X.shape[1]
     assert estimator.device_ == "cpu"
+    assert estimator.mst_representatives_per_component == 10
 
 
 def test_fit_timing_diagnostics_are_finite_and_bounded():
@@ -186,6 +187,10 @@ def test_mps_device_runs_when_available():
     ("parameter", "value"),
     [
         ("n_msts", 0),
+        ("mst_representatives_per_component", 0),
+        ("mst_representatives_per_component", -1),
+        ("mst_representatives_per_component", 1.5),
+        ("mst_representatives_per_component", True),
         ("n_epochs", -1),
         ("batch_size", 0),
         ("negative_ratio", -1),
@@ -217,6 +222,27 @@ def test_exact_graph_uses_euclidean_distances():
     np.testing.assert_array_equal(estimator.graph_edges_, expected)
     np.testing.assert_array_equal(estimator.graph_weights_, weights)
     assert set(estimator.graph_weights_) == {1.0, 0.5}
+
+
+def test_representative_count_is_passed_to_mst_builder(monkeypatch):
+    captured = {}
+
+    def fake_build_mst_edges(X, **kwargs):
+        captured.update(kwargs)
+        return (
+            np.array([[0, 1], [1, 2], [2, 3], [3, 4]], dtype=np.intp),
+            np.ones(4, dtype=np.float64),
+        )
+
+    monkeypatch.setattr("imste._estimator.build_mst_edges", fake_build_mst_edges)
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        n_msts=1,
+        n_epochs=0,
+        mst_representatives_per_component=3,
+    ).fit(small_data())
+
+    assert estimator.mst_representatives_per_component == 3
+    assert captured["representatives_per_component"] == 3
 
 
 def test_attraction_uses_global_weight_sum_scale(monkeypatch):
