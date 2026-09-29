@@ -182,14 +182,15 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         distances. ``'famst'`` uses a sparse approximate-neighbor graph and
         FAMST-style component connection and refinement; install ``imste[famst]``.
     mst_neighbors : int, default=15
-        Initial approximate-neighbor count for ``mst_method='famst'``.
+        Minimum initial approximate-neighbor count for ``mst_method='famst'``.
+        FAMST targets the larger of this value and ``2 * n_msts``, subject to
+        ``mst_max_neighbors``.
     mst_inter_component_edges : int, default=5
         FAMST candidate edges retained between each disconnected component pair.
     mst_max_neighbors : int or None, default=None
         Maximum approximate-neighbor count. ``None`` allows the FAMST builder to
-        increase the count up to the larger of four times ``mst_neighbors`` or
-        four times ``n_msts`` to obtain the requested number of edge-disjoint
-        trees.
+        increase the count up to four times its starting neighbor count to obtain
+        the requested number of edge-disjoint trees.
     progress_callback : callable or None, default=None
         Optional function called with ``(completed_epochs, total_epochs)`` after
         each optimization epoch.

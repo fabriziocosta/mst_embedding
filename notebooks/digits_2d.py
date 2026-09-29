@@ -621,14 +621,18 @@ def display_interactive_embedding(
                     if embedding_type.value == "inductive"
                     else estimator
                 )
+
+                def format_fit_duration(seconds: float) -> str:
+                    return f"{seconds:.1f} s ({seconds / 60:.1f} min)"
+
                 display(
                     HTML(
-                        f"<p><b>Total fit:</b> {elapsed:.1f} s on "
+                        f"<p><b>Total fit:</b> {format_fit_duration(elapsed)} on "
                         f"<b>{estimator.device_}</b><br>"
                         f"<b>Graph construction:</b> "
-                        f"{timed_embedder.graph_construction_time_:.1f} s<br>"
+                        f"{format_fit_duration(timed_embedder.graph_construction_time_)}<br>"
                         f"<b>Embedding optimization:</b> "
-                        f"{timed_embedder.embedding_optimization_time_:.1f} s</p>"
+                        f"{format_fit_duration(timed_embedder.embedding_optimization_time_)}</p>"
                     )
                 )
                 progress.value = epochs

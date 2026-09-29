@@ -221,15 +221,19 @@ def iterated_famst_edges(
         )
 
     rng = np.random.RandomState(random_state)
-    start_neighbors = min(neighbors, n_samples - 1)
+    configured_start_neighbors = min(neighbors, n_samples - 1)
+    start_neighbors = min(
+        max(configured_start_neighbors, 2 * n_msts), n_samples - 1
+    )
     cap = min(
         n_samples - 1,
         max_neighbors
         if max_neighbors is not None
         else max(start_neighbors, 4 * start_neighbors, 4 * n_msts),
     )
-    if cap < start_neighbors:
+    if cap < configured_start_neighbors:
         raise ValueError("mst_max_neighbors must be at least mst_neighbors.")
+    start_neighbors = min(start_neighbors, cap)
 
     current_neighbors = start_neighbors
     while True:
