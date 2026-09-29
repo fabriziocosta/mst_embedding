@@ -204,10 +204,11 @@ optimization by passing an `IteratedMinimumSpanningTreeEmbedder` as `embedder`.
 - [MST scaling benchmark](notebooks/mst_scaling_benchmark.ipynb): compare exact
   Prim with approximate FAMST graph construction over increasing dataset sizes.
 - [Interactive 2D embedding](notebooks/digits_2d_interactive.ipynb): choose a
-  dataset, fit settings, and optionally compare MLP predictions with the
-  optimized coordinates.
-- [Interactive 3D embedding](notebooks/digits_3d_interactive.ipynb): explore
-  three-dimensional embeddings with Plotly.
+  dataset, select exact Prim or approximate FAMST, configure fit settings, and
+  optionally compare MLP predictions with the optimized coordinates.
+- [Interactive 3D embedding](notebooks/digits_3d_interactive.ipynb): select
+  exact Prim or approximate FAMST and explore three-dimensional embeddings
+  with Plotly.
 - [Parameter sweep](notebooks/digits_parameter_sweep.ipynb): compare IMSTE
   settings and reference embeddings on MNIST.
 - [High-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb):

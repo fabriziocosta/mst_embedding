@@ -82,7 +82,8 @@ def display_interactive_embedding(
 
     Dataset choices load lazily and cache balanced sample pools with separate,
     disjoint training and novel rows. Controls configure sample count, MST
-    count, embedding batch size, logistic-loss settings, and negative sampling.
+    count, MST builder, embedding batch size, logistic-loss settings, and
+    negative sampling.
     The estimator menu selects transductive IMSTE or its inductive MLP
     extension. Attraction uses fixed weight-sum normalization. Fits use 1,000
     epochs and a 0.05 learning rate. Fitting starts when the user clicks the
@@ -125,7 +126,8 @@ def display_interactive_embedding(
     status.value = (
         f"{DATASET_LABELS['mnist']} pool available: {len(X_pool):,} samples "
         f"({max_training_instances:,} training plus an equally sized novel pool). "
-        f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
+        f"Default selection: {initial_sample_count:,} samples, 10 MSTs with "
+        "exact Prim, "
         "squared distance, log attraction, logistic repulsion, "
         "weight_sum normalization, 1,000 epochs, and an 8,192 embedding batch. "
         "Click Fit embedding to run."
@@ -156,6 +158,12 @@ def display_interactive_embedding(
         step=1,
         description="MSTs",
         continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    mst_method = widgets.Dropdown(
+        options=[("Prim (exact)", "prim"), ("FAMST (approximate)", "famst")],
+        value="prim",
+        description="MST builder",
         style={"description_width": "initial"},
     )
     lambda_rep = widgets.FloatSlider(
@@ -396,6 +404,7 @@ def display_interactive_embedding(
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
         n_msts.value = 10
+        mst_method.value = "prim"
         lambda_rep.value = 0.5
         logistic_margin.value = 1.0
         logistic_temperature.value = 0.5
@@ -430,6 +439,7 @@ def display_interactive_embedding(
                     )
                 core_estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
+                    mst_method=mst_method.value,
                     n_components=2,
                     n_epochs=1000,
                     batch_size=batch_size.value,
@@ -509,6 +519,7 @@ def display_interactive_embedding(
                         f"2D IMSTE · {DATASET_LABELS[active_dataset['name']]} · "
                         f"{n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
+                        f"{mst_method.value.upper()} · "
                         "squared distance · log attraction · "
                         "logistic repulsion · weight_sum · "
                         f"1,000 epochs{logistic_title}{knn_title}"
@@ -552,6 +563,7 @@ def display_interactive_embedding(
         [
             widgets.HBox([dataset]),
             widgets.HBox([sample_count, n_msts]),
+            widgets.HBox([mst_method]),
             widgets.HBox([batch_size]),
             widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([logistic_margin, logistic_temperature]),
@@ -581,6 +593,7 @@ def display_interactive_embedding(
             "sample_count": sample_count,
             "batch_size": batch_size,
             "n_msts": n_msts,
+            "mst_method": mst_method,
             "lambda_rep": lambda_rep,
             "logistic_margin": logistic_margin,
             "logistic_temperature": logistic_temperature,

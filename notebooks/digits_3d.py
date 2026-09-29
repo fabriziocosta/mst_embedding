@@ -35,6 +35,7 @@ def fit_and_plot_mst_3d(
     epsilon=1e-4,
     random_state=42,
     device="auto",
+    mst_method="prim",
     trustworthiness_neighbors=10,
 ):
     """Fit one 3D IMSTE embedding and return its scores and Plotly figure."""
@@ -56,6 +57,7 @@ def fit_and_plot_mst_3d(
         epsilon=epsilon,
         random_state=random_state,
         device=device,
+        mst_method=mst_method,
     )
     print(
         f"Fitting 3D IMSTE embedding with n_msts={n_msts}, "
@@ -106,7 +108,7 @@ def fit_and_plot_mst_3d(
     )
     figure.update_layout(
         title=(
-            f"3D IMSTE (n_msts={n_msts})<br>"
+            f"3D IMSTE ({mst_method.upper()}, n_msts={n_msts})<br>"
             f"trustworthiness={score:.3f}; 5-NN CV={knn_accuracy:.3f}; "
             f"runtime={elapsed_text} ({estimator.device_})"
         ),
@@ -129,6 +131,7 @@ def fit_and_plot_mst_3d(
     )
     summary = pd.DataFrame([{
         "n_msts": n_msts,
+        "mst_method": mst_method,
         "n_components": 3,
         "trustworthiness": score,
         "5-NN 5-fold CV accuracy": knn_accuracy,
@@ -176,7 +179,7 @@ def display_interactive_mst_3d(
     minimum_sample_count = min(500, max_instances)
     status.value = (
         f"Balanced pool available: {max_instances:,} samples. "
-        f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
+        f"Default selection: {initial_sample_count:,} samples, 10 MSTs with exact Prim, "
         "1,000 epochs. Click Fit 3D embedding to run."
     )
 
@@ -192,6 +195,12 @@ def display_interactive_mst_3d(
     n_msts = widgets.IntSlider(
         value=10, min=1, max=20, step=1,
         description="MSTs", continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    mst_method = widgets.Dropdown(
+        options=[("Prim (exact)", "prim"), ("FAMST (approximate)", "famst")],
+        value="prim",
+        description="MST builder",
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
@@ -265,6 +274,7 @@ def display_interactive_mst_3d(
     def reset_sliders(_=None):
         sample_count.value = min(1000, max_instances)
         n_msts.value = 10
+        mst_method.value = "prim"
         n_epochs.value = 1000
         batch_size.value = 4096
         learning_rate.value = 0.05
@@ -288,6 +298,7 @@ def display_interactive_mst_3d(
                     X,
                     labels,
                     n_msts=n_msts.value,
+                    mst_method=mst_method.value,
                     n_epochs=n_epochs.value,
                     batch_size=batch_size.value,
                     learning_rate=learning_rate.value,
@@ -312,6 +323,7 @@ def display_interactive_mst_3d(
     controls = widgets.VBox(
         [
             widgets.HBox([sample_count, n_msts]),
+            widgets.HBox([mst_method]),
             widgets.HBox([n_epochs, batch_size, learning_rate]),
             widgets.HBox([negative_ratio, lambda_rep, epsilon]),
             widgets.HBox([random_state_slider, trustworthiness_neighbors, device]),
@@ -327,6 +339,7 @@ def display_interactive_mst_3d(
         "sliders": {
             "sample_count": sample_count,
             "n_msts": n_msts,
+            "mst_method": mst_method,
             "n_epochs": n_epochs,
             "batch_size": batch_size,
             "learning_rate": learning_rate,
