@@ -193,6 +193,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     progress_callback : callable or None, default=None
         Optional function called with ``(completed_epochs, total_epochs)`` after
         each optimization epoch.
+    mst_progress_callback : callable or None, default=None
+        Optional function called with ``(completed_trees, total_trees, detail)``
+        during MST construction. FAMST's detail includes its current neighbor
+        count.
     """
 
     def __init__(
@@ -214,6 +218,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         mst_inter_component_edges: int = 5,
         mst_max_neighbors: int | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        mst_progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> None:
         self.n_msts = n_msts
         self.n_components = n_components
@@ -232,6 +237,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.mst_inter_component_edges = mst_inter_component_edges
         self.mst_max_neighbors = mst_max_neighbors
         self.progress_callback = progress_callback
+        self.mst_progress_callback = mst_progress_callback
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -286,6 +292,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             neighbors=mst_neighbors,
             inter_component_edges=inter_component_edges,
             max_neighbors=max_neighbors,
+            progress_callback=self.mst_progress_callback,
         )
         self.graph_construction_time_ = time.perf_counter() - graph_started
 

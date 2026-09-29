@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 from scipy.spatial.distance import cdist
 
@@ -9,6 +11,7 @@ from scipy.spatial.distance import cdist
 def iterated_prim_edges(
     X: np.ndarray,
     n_msts: int,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return exact edge-disjoint MSTs using dense Prim.
 
@@ -19,12 +22,15 @@ def iterated_prim_edges(
     if not np.isfinite(distances).all():
         raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
     np.fill_diagonal(distances, 0.0)
-    return iterated_prim_distance_edges(distances, n_msts)
+    return iterated_prim_distance_edges(
+        distances, n_msts, progress_callback=progress_callback
+    )
 
 
 def iterated_prim_distance_edges(
     distances: np.ndarray,
     n_msts: int,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Construct edge-disjoint MSTs from a precomputed distance matrix."""
     n_samples = distances.shape[0]
@@ -76,6 +82,8 @@ def iterated_prim_distance_edges(
             improve = connectable & (distances[node] < best)
             best[improve] = distances[node, improve]
             parent[improve] = node
+        if progress_callback is not None:
+            progress_callback(rank, n_msts, "Prim")
 
     return (
         np.asarray(edges, dtype=np.intp).reshape(-1, 2),

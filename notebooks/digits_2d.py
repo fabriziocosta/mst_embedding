@@ -299,6 +299,15 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
         layout={"width": "100%"},
     )
+    mst_progress = widgets.IntProgress(
+        value=0,
+        min=0,
+        max=10,
+        description="MSTs",
+        bar_style="",
+        style={"description_width": "initial"},
+        layout={"width": "100%"},
+    )
     output = widgets.Output()
     projection_output = widgets.Output()
     current_fit: dict[str, object] = {}
@@ -400,6 +409,9 @@ def display_interactive_embedding(
         progress.value = 0
         progress.description = "Fit"
         progress.bar_style = ""
+        mst_progress.value = 0
+        mst_progress.description = "MSTs"
+        mst_progress.bar_style = ""
         status.value = f"Loading {DATASET_LABELS[selected]} sample pool..."
         try:
             if selected not in pool_cache:
@@ -433,6 +445,10 @@ def display_interactive_embedding(
         progress.max = 100
         progress.description = "Fit"
         progress.bar_style = ""
+        mst_progress.value = 0
+        mst_progress.max = n_msts.value
+        mst_progress.description = "MSTs"
+        mst_progress.bar_style = ""
         projection_output.clear_output(wait=True)
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
@@ -458,8 +474,12 @@ def display_interactive_embedding(
         current_fit.clear()
         progress.value = 0
         progress.max = n_epochs.value
-        progress.description = "Building graph"
+        progress.description = "Optimization"
         progress.bar_style = "info"
+        mst_progress.value = 0
+        mst_progress.max = n_msts.value
+        mst_progress.description = "Building graph"
+        mst_progress.bar_style = "info"
         projection_output.clear_output(wait=True)
         status.value = "Building the MST graph before optimizing the embedding..."
         with output:
@@ -489,6 +509,13 @@ def display_interactive_embedding(
                             f"({n_samples:,} rows, {mst_method.value.upper()})."
                         )
 
+                def report_mst_progress(
+                    completed: int, total: int, detail: str
+                ) -> None:
+                    mst_progress.max = total
+                    mst_progress.value = completed
+                    mst_progress.description = detail
+
                 core_estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     mst_method=mst_method.value,
@@ -504,6 +531,7 @@ def display_interactive_embedding(
                     random_state=random_state,
                     device=device.value,
                     progress_callback=report_progress,
+                    mst_progress_callback=report_mst_progress,
                 )
                 if embedding_type.value == "inductive":
                     estimator = InductiveIMSTE(
@@ -518,6 +546,9 @@ def display_interactive_embedding(
                     estimator = core_estimator
                 started = time.perf_counter()
                 embedding = estimator.fit_transform(X)
+                mst_progress.value = n_msts.value
+                mst_progress.description = "MSTs complete"
+                mst_progress.bar_style = "success"
                 reference_embedding = (
                     estimator.reference_embedding_
                     if embedding_type.value == "inductive"
@@ -616,6 +647,9 @@ def display_interactive_embedding(
             except Exception:
                 progress.description = "Failed"
                 progress.bar_style = "danger"
+                if mst_progress.value < mst_progress.max:
+                    mst_progress.description = "MST build failed"
+                    mst_progress.bar_style = "danger"
                 status.value = "The fit failed; see the error details below."
                 traceback.print_exc()
             finally:
@@ -646,6 +680,7 @@ def display_interactive_embedding(
     display(
         controls,
         widgets.HBox([fit_button, reset_button, mlp_button]),
+        mst_progress,
         progress,
         output,
         projection_output,
@@ -655,6 +690,7 @@ def display_interactive_embedding(
         "controls": controls,
         "fit_button": fit_button,
         "progress": progress,
+        "mst_progress": mst_progress,
         "mlp_button": mlp_button,
         "reset_button": reset_button,
         "output": output,

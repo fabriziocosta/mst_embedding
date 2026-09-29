@@ -8,7 +8,12 @@ candidate graph and increases the ANN neighborhood size when necessary.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
+
+
+ProgressCallback = Callable[[int, int, str], None]
 
 
 class _DisjointSet:
@@ -165,6 +170,8 @@ def _kruskal_edge_disjoint_trees(
     n_samples: int,
     candidate_edges: dict[tuple[int, int], float],
     n_msts: int,
+    progress_callback: ProgressCallback | None = None,
+    progress_detail: str = "FAMST",
 ) -> tuple[np.ndarray, np.ndarray] | None:
     available = dict(candidate_edges)
     result_edges: list[tuple[int, int]] = []
@@ -187,6 +194,8 @@ def _kruskal_edge_disjoint_trees(
         result_weights.extend([1.0 / rank] * len(tree))
         for edge in tree:
             del available[edge]
+        if progress_callback is not None:
+            progress_callback(rank, n_msts, progress_detail)
     return (
         np.asarray(result_edges, dtype=np.intp).reshape(-1, 2),
         np.asarray(result_weights, dtype=np.float64),
@@ -200,13 +209,16 @@ def iterated_famst_edges(
     neighbors: int,
     inter_component_edges: int,
     max_neighbors: int | None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build approximate edge-disjoint trees from an adaptive sparse graph."""
     n_samples = len(X)
     if n_samples <= 3:
         from .prim import iterated_prim_edges
 
-        return iterated_prim_edges(X, n_msts)
+        return iterated_prim_edges(
+            X, n_msts, progress_callback=progress_callback
+        )
 
     rng = np.random.RandomState(random_state)
     start_neighbors = min(neighbors, n_samples - 1)
@@ -224,11 +236,22 @@ def iterated_famst_edges(
         if current_neighbors >= n_samples - 1:
             from .prim import iterated_prim_edges
 
-            return iterated_prim_edges(X, n_msts)
+            return iterated_prim_edges(
+                X, n_msts, progress_callback=progress_callback
+            )
+        detail = f"FAMST ({current_neighbors} neighbors)"
+        if progress_callback is not None:
+            progress_callback(0, n_msts, detail)
         seed = int(rng.randint(0, np.iinfo(np.int32).max))
         candidate_edges = _ann_edges(X, current_neighbors, seed)
         _connect_components(X, candidate_edges, inter_component_edges, rng)
-        trees = _kruskal_edge_disjoint_trees(n_samples, candidate_edges, n_msts)
+        trees = _kruskal_edge_disjoint_trees(
+            n_samples,
+            candidate_edges,
+            n_msts,
+            progress_callback=progress_callback,
+            progress_detail=detail,
+        )
         if trees is not None:
             return trees
         if current_neighbors >= cap:
