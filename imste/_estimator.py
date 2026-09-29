@@ -5,6 +5,7 @@ from __future__ import annotations
 import numbers
 import sys
 import time
+from collections.abc import Callable
 
 import numpy as np
 import torch
@@ -97,18 +98,43 @@ def _sample_negative_targets(
 
 def _sample_sparse_negative_targets(
     rng: np.random.RandomState,
-    adjacency: list[set[int]],
+    adjacency_keys: np.ndarray,
     negative_sources: np.ndarray,
     n_samples: int,
 ) -> np.ndarray:
-    """Rejection-sample non-neighbors without a quadratic bit matrix."""
-    targets = np.empty(negative_sources.size, dtype=np.intp)
-    for index, source_value in enumerate(negative_sources):
-        source = int(source_value)
-        target = int(rng.randint(n_samples))
-        while target == source or target in adjacency[source]:
-            target = int(rng.randint(n_samples))
-        targets[index] = target
+    """Vectorized rejection-sample non-neighbors without a dense bit matrix."""
+    targets = rng.randint(n_samples, size=negative_sources.size).astype(np.intp)
+    invalid = np.ones(targets.size, dtype=bool)
+    for _ in range(8):
+        invalid_indices = np.flatnonzero(invalid)
+        if invalid_indices.size == 0:
+            break
+        sources = negative_sources[invalid_indices]
+        candidates = targets[invalid_indices]
+        keys = sources.astype(np.int64) * n_samples + candidates
+        locations = np.searchsorted(adjacency_keys, keys)
+        in_bounds = locations < adjacency_keys.size
+        blocked = np.zeros(keys.size, dtype=bool)
+        blocked[in_bounds] = adjacency_keys[locations[in_bounds]] == keys[in_bounds]
+        accepted = (sources != candidates) & ~blocked
+        invalid[invalid_indices[accepted]] = False
+        retry_indices = invalid_indices[~accepted]
+        targets[retry_indices] = rng.randint(n_samples, size=retry_indices.size)
+
+    # Rare for sparse graphs; handle unusually dense nodes exactly.
+    for source in np.unique(negative_sources[invalid]):
+        source_indices = np.flatnonzero(invalid & (negative_sources == source))
+        start = int(source) * n_samples
+        first = np.searchsorted(adjacency_keys, start)
+        last = np.searchsorted(adjacency_keys, start + n_samples)
+        blocked = adjacency_keys[first:last] - start
+        candidates = np.ones(n_samples, dtype=bool)
+        candidates[int(source)] = False
+        candidates[blocked] = False
+        available = np.flatnonzero(candidates)
+        if available.size == 0:
+            raise ValueError("Cannot sample a negative pair for a fully connected node.")
+        targets[source_indices] = rng.choice(available, size=source_indices.size)
     return targets
 
 
@@ -163,6 +189,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Maximum approximate-neighbor count. ``None`` allows the FAMST builder to
         increase the count up to four times ``mst_neighbors`` to obtain the
         requested number of edge-disjoint trees.
+    progress_callback : callable or None, default=None
+        Optional function called with ``(completed_epochs, total_epochs)`` after
+        each optimization epoch.
     """
 
     def __init__(
@@ -183,6 +212,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         mst_neighbors: int = 15,
         mst_inter_component_edges: int = 5,
         mst_max_neighbors: int | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         self.n_msts = n_msts
         self.n_components = n_components
@@ -200,6 +230,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.mst_neighbors = mst_neighbors
         self.mst_inter_component_edges = mst_inter_component_edges
         self.mst_max_neighbors = mst_max_neighbors
+        self.progress_callback = progress_callback
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -283,6 +314,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         sample_ids = np.arange(n_samples)
         packed_adjacency = None
         sparse_adjacency = None
+        sparse_adjacency_keys = None
         if self.mst_method == "prim":
             packed_adjacency = np.zeros(
                 (n_samples, (n_samples + 7) // 8), dtype=np.uint8
@@ -309,6 +341,15 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 sparse_adjacency[target].add(int(source))
             for sample_id in sample_ids:
                 sparse_adjacency[sample_id].add(int(sample_id))
+            sparse_adjacency_keys = np.fromiter(
+                (
+                    source * n_samples + target
+                    for source, targets in enumerate(sparse_adjacency)
+                    for target in targets
+                ),
+                dtype=np.int64,
+            )
+            sparse_adjacency_keys.sort()
         node_degrees = np.bincount(
             np.concatenate((edge_sources, edge_targets)), minlength=n_samples
         )
@@ -345,7 +386,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                         )
                     else:
                         negative_targets = _sample_sparse_negative_targets(
-                            rng, sparse_adjacency, negative_sources, n_samples
+                            rng, sparse_adjacency_keys, negative_sources, n_samples
                         )
                     ni = torch.as_tensor(
                         negative_sources, dtype=torch.long, device=compute_device
@@ -370,6 +411,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 optimizer.step()
                 with torch.no_grad():
                     coordinates -= coordinates.mean(dim=0, keepdim=True)
+            if self.progress_callback is not None:
+                self.progress_callback(_ + 1, n_epochs)
 
         if compute_device.type == "mps":
             torch.mps.synchronize()

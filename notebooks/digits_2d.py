@@ -82,21 +82,19 @@ def display_interactive_embedding(
 
     Dataset choices load lazily and cache balanced sample pools with separate,
     disjoint training and novel rows. Controls configure sample count, MST
-    count, MST builder, embedding batch size, logistic-loss settings, and
+    count, MST builder, embedding batch size, epoch count, logistic-loss settings, and
     negative sampling.
     The estimator menu selects transductive IMSTE or its inductive MLP
-    extension. Attraction uses fixed weight-sum normalization. Fits use 1,000
-    epochs and a 0.05 learning rate. Fitting starts when the user clicks the
-    fit button.
+    extension. Attraction uses fixed weight-sum normalization. Fits use the
+    selected epoch count and a 0.05 learning rate. Fitting starts when the
+    user clicks the fit button.
     Returns widget references for notebook customization.
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
-    if max_instances > 35_000:
-        raise ValueError(
-            "max_instances must be at most 35,000 to reserve an equally sized "
-            "novel batch from the 70,000-row dataset pools."
-        )
+    # Keep an equally sized novel pool from the 70,000-row digit datasets.
+    # Requests above half the pool use the largest available training split.
+    max_instances = min(max_instances, 35_000)
     if initial_sample_count < 500:
         raise ValueError("initial_sample_count must be at least 500.")
     initial_sample_count = min(initial_sample_count, max_instances)
@@ -129,7 +127,7 @@ def display_interactive_embedding(
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs with "
         "exact Prim, "
         "squared distance, log attraction, logistic repulsion, "
-        "weight_sum normalization, 1,000 epochs, and an 8,192 embedding batch. "
+        "weight_sum normalization, 100 epochs, and an 8,192 embedding batch. "
         "Click Fit embedding to run."
     )
 
@@ -148,6 +146,15 @@ def display_interactive_embedding(
         max=16384,
         step=256,
         description="Embedding batch size",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    n_epochs = widgets.IntSlider(
+        value=100,
+        min=50,
+        max=1000,
+        step=50,
+        description="Epochs",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -275,6 +282,15 @@ def display_interactive_embedding(
         icon="eye",
         disabled=True,
     )
+    progress = widgets.IntProgress(
+        value=0,
+        min=0,
+        max=100,
+        description="Fit",
+        bar_style="",
+        style={"description_width": "initial"},
+        layout={"width": "100%"},
+    )
     output = widgets.Output()
     projection_output = widgets.Output()
     current_fit: dict[str, object] = {}
@@ -373,6 +389,9 @@ def display_interactive_embedding(
         mlp_button.disabled = True
         current_fit.clear()
         projection_output.clear_output(wait=True)
+        progress.value = 0
+        progress.description = "Fit"
+        progress.bar_style = ""
         status.value = f"Loading {DATASET_LABELS[selected]} sample pool..."
         try:
             if selected not in pool_cache:
@@ -400,6 +419,10 @@ def display_interactive_embedding(
     def reset_sliders(_=None) -> None:
         current_fit.clear()
         mlp_button.disabled = True
+        progress.value = 0
+        progress.max = 100
+        progress.description = "Fit"
+        progress.bar_style = ""
         projection_output.clear_output(wait=True)
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
@@ -411,6 +434,7 @@ def display_interactive_embedding(
         negative_ratio.value = 5
         compute_knn.value = False
         batch_size.value = 8192
+        n_epochs.value = 100
         embedding_type.value = "transductive"
         mlp_n_layers.value = 6
         mlp_layer_size.value = 128
@@ -421,8 +445,12 @@ def display_interactive_embedding(
         fit_button.disabled = True
         mlp_button.disabled = True
         current_fit.clear()
+        progress.value = 0
+        progress.max = n_epochs.value
+        progress.description = "Building graph"
+        progress.bar_style = "info"
         projection_output.clear_output(wait=True)
-        status.value = "Fitting the 2D embedding with the selected settings..."
+        status.value = "Building the MST graph before optimizing the embedding..."
         with output:
             clear_output(wait=True)
             try:
@@ -437,11 +465,23 @@ def display_interactive_embedding(
                         "The selected dataset pool does not contain enough novel "
                         "rows for a same-size prediction batch."
                     )
+                epochs = n_epochs.value
+
+                def report_progress(epoch: int, total_epochs: int) -> None:
+                    update_interval = max(1, total_epochs // 100)
+                    if epoch == 1 or epoch % update_interval == 0 or epoch == total_epochs:
+                        progress.description = "Optimizing"
+                        progress.value = epoch
+                        status.value = (
+                            f"Optimizing embedding: epoch {epoch:,}/{total_epochs:,} "
+                            f"({n_samples:,} rows, {mst_method.value.upper()})."
+                        )
+
                 core_estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     mst_method=mst_method.value,
                     n_components=2,
-                    n_epochs=1000,
+                    n_epochs=epochs,
                     batch_size=batch_size.value,
                     learning_rate=0.05,
                     negative_ratio=negative_ratio.value,
@@ -450,6 +490,7 @@ def display_interactive_embedding(
                     logistic_temperature=logistic_temperature.value,
                     random_state=random_state,
                     device=device.value,
+                    progress_callback=report_progress,
                 )
                 if embedding_type.value == "inductive":
                     estimator = InductiveIMSTE(
@@ -522,7 +563,7 @@ def display_interactive_embedding(
                         f"{mst_method.value.upper()} · "
                         "squared distance · log attraction · "
                         "logistic repulsion · weight_sum · "
-                        f"1,000 epochs{logistic_title}{knn_title}"
+                        f"{epochs:,} epochs{logistic_title}{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
                     ylabel="Embedding dimension 2",
@@ -537,6 +578,9 @@ def display_interactive_embedding(
                         f"<b>{estimator.device_}</b>.</p>"
                     )
                 )
+                progress.value = epochs
+                progress.description = "Complete"
+                progress.bar_style = "success"
                 status.value = "Embedding ready. "
                 if not compute_knn.value:
                     status.value += "The optional cross-validation estimate was skipped. "
@@ -548,6 +592,8 @@ def display_interactive_embedding(
                     )
                 status.value += "Adjust the controls and click Fit embedding to update it."
             except Exception:
+                progress.description = "Failed"
+                progress.bar_style = "danger"
                 status.value = "The fit failed; see the error details below."
                 traceback.print_exc()
             finally:
@@ -565,6 +611,7 @@ def display_interactive_embedding(
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([mst_method]),
             widgets.HBox([batch_size]),
+            widgets.HBox([n_epochs]),
             widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([logistic_margin, logistic_temperature]),
             widgets.HBox([compute_knn]),
@@ -576,6 +623,7 @@ def display_interactive_embedding(
     display(
         controls,
         widgets.HBox([fit_button, reset_button, mlp_button]),
+        progress,
         output,
         projection_output,
     )
@@ -583,6 +631,7 @@ def display_interactive_embedding(
     return {
         "controls": controls,
         "fit_button": fit_button,
+        "progress": progress,
         "mlp_button": mlp_button,
         "reset_button": reset_button,
         "output": output,
@@ -592,6 +641,7 @@ def display_interactive_embedding(
             "dataset": dataset,
             "sample_count": sample_count,
             "batch_size": batch_size,
+            "n_epochs": n_epochs,
             "n_msts": n_msts,
             "mst_method": mst_method,
             "lambda_rep": lambda_rep,
