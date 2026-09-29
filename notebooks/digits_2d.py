@@ -173,6 +173,15 @@ def display_interactive_embedding(
         description="MST builder",
         style={"description_width": "initial"},
     )
+    mst_max_neighbors = widgets.IntSlider(
+        value=120,
+        min=15,
+        max=512,
+        step=15,
+        description="FAMST max neighbors",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
     lambda_rep = widgets.FloatSlider(
         value=0.5,
         min=0.0,
@@ -428,6 +437,7 @@ def display_interactive_embedding(
         sample_count.value = min(1000, sample_count.max)
         n_msts.value = 10
         mst_method.value = "prim"
+        mst_max_neighbors.value = 120
         lambda_rep.value = 0.5
         logistic_margin.value = 1.0
         logistic_temperature.value = 0.5
@@ -480,6 +490,7 @@ def display_interactive_embedding(
                 core_estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     mst_method=mst_method.value,
+                    mst_max_neighbors=mst_max_neighbors.value,
                     n_components=2,
                     n_epochs=epochs,
                     batch_size=batch_size.value,
@@ -572,10 +583,19 @@ def display_interactive_embedding(
                 fig.tight_layout()
                 display(fig)
                 plt.close(fig)
+                timed_embedder = (
+                    estimator.embedder_
+                    if embedding_type.value == "inductive"
+                    else estimator
+                )
                 display(
                     HTML(
-                        f"<p>Fit in {elapsed:.1f} seconds on "
-                        f"<b>{estimator.device_}</b>.</p>"
+                        f"<p><b>Total fit:</b> {elapsed:.1f} s on "
+                        f"<b>{estimator.device_}</b><br>"
+                        f"<b>Graph construction:</b> "
+                        f"{timed_embedder.graph_construction_time_:.1f} s<br>"
+                        f"<b>Embedding optimization:</b> "
+                        f"{timed_embedder.embedding_optimization_time_:.1f} s</p>"
                     )
                 )
                 progress.value = epochs
@@ -610,6 +630,7 @@ def display_interactive_embedding(
             widgets.HBox([dataset]),
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([mst_method]),
+            widgets.HBox([mst_max_neighbors]),
             widgets.HBox([batch_size]),
             widgets.HBox([n_epochs]),
             widgets.HBox([lambda_rep, negative_ratio]),
@@ -644,6 +665,7 @@ def display_interactive_embedding(
             "n_epochs": n_epochs,
             "n_msts": n_msts,
             "mst_method": mst_method,
+            "mst_max_neighbors": mst_max_neighbors,
             "lambda_rep": lambda_rep,
             "logistic_margin": logistic_margin,
             "logistic_temperature": logistic_temperature,

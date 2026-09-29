@@ -212,7 +212,9 @@ def iterated_famst_edges(
     start_neighbors = min(neighbors, n_samples - 1)
     cap = min(
         n_samples - 1,
-        max_neighbors if max_neighbors is not None else max(start_neighbors, 4 * start_neighbors),
+        max_neighbors
+        if max_neighbors is not None
+        else max(start_neighbors, 4 * start_neighbors, 4 * n_msts),
     )
     if cap < start_neighbors:
         raise ValueError("mst_max_neighbors must be at least mst_neighbors.")
@@ -231,8 +233,8 @@ def iterated_famst_edges(
             return trees
         if current_neighbors >= cap:
             raise ValueError(
-                "FAMST candidate graph could not supply the requested number of "
-                "edge-disjoint spanning trees. Increase mst_max_neighbors or "
-                "reduce n_msts."
+                f"FAMST candidate graph could not supply {n_msts} edge-disjoint "
+                f"spanning trees with up to {current_neighbors} neighbors. "
+                "Increase mst_max_neighbors or reduce n_msts."
             )
         current_neighbors = min(cap, max(current_neighbors + 1, current_neighbors * 2))

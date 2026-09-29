@@ -187,8 +187,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         FAMST candidate edges retained between each disconnected component pair.
     mst_max_neighbors : int or None, default=None
         Maximum approximate-neighbor count. ``None`` allows the FAMST builder to
-        increase the count up to four times ``mst_neighbors`` to obtain the
-        requested number of edge-disjoint trees.
+        increase the count up to the larger of four times ``mst_neighbors`` or
+        four times ``n_msts`` to obtain the requested number of edge-disjoint
+        trees.
     progress_callback : callable or None, default=None
         Optional function called with ``(completed_epochs, total_epochs)`` after
         each optimization epoch.
