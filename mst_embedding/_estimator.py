@@ -163,7 +163,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     The learned coordinates are attached to the training rows. By default,
     :meth:`transform` accepts only the original training matrix in its original
-    row order. Set ``transform_method="mlp"`` to learn an MLP projection for new rows.
+    row order. Set ``transform_method="mlp"`` to learn an MLP projection for
+    new rows.
 
     Parameters
     ----------
@@ -210,11 +211,11 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     transform_method : {'direct', 'mlp'}, default='direct'
         ``'direct'`` returns fitted coordinates for the original training rows
         and rejects new rows. ``'mlp'`` fits an MLP to the learned coordinates
-        and uses it to transform new rows. Its defaults are three 256-unit
+        and uses it to transform new rows. Its defaults are six 128-unit
         hidden layers with 0.1 dropout.
-    mlp_n_layers : int, default=3
+    mlp_n_layers : int, default=6
         Number of hidden layers in the projection MLP.
-    mlp_layer_size : int, default=256
+    mlp_layer_size : int, default=128
         Number of units in each MLP hidden layer.
     mlp_dropout : float, default=0.1
         Dropout probability after each hidden layer; must be in ``[0, 1)``.
@@ -226,9 +227,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Stop after this many epochs without validation improvement, once the
         minimum epoch count has been reached.
     mlp_batch_size : int, default=256
-        Number of training rows per projection-network update.
+        Number of training rows per MLP update.
     mlp_learning_rate : float, default=0.001
-        Adam learning rate for the projection network.
+        Adam learning rate for the MLP.
     attraction_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(positive_squared_distances,
         edge_weights)`` that returns a scalar differentiable PyTorch tensor.
@@ -267,8 +268,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
         repulsion_type: str = "logistic",
         transform_method: str = "direct",
-        mlp_n_layers: int = 3,
-        mlp_layer_size: int = 256,
+        mlp_n_layers: int = 6,
+        mlp_layer_size: int = 128,
         mlp_dropout: float = 0.1,
         mlp_epochs: int = 200,
         mlp_min_epochs: int = 100,
@@ -584,6 +585,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             )
             X_mlp_t = torch.as_tensor(X_mlp, device=compute_device)
             y_mlp_t = torch.as_tensor(y_mlp, device=compute_device)
+            training_indices_t = torch.as_tensor(
+                training_indices, dtype=torch.long, device=compute_device
+            )
             validation_indices_t = torch.as_tensor(
                 validation_indices, dtype=torch.long, device=compute_device
             )
@@ -639,10 +643,15 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 if best_state is not None:
                     self.mlp_.load_state_dict(best_state)
                 self.mlp_.eval()
+                with torch.no_grad():
+                    training_prediction = self.mlp_(X_mlp_t[training_indices_t])
+                    restored_training_loss = torch.mean(
+                        (training_prediction - y_mlp_t[training_indices_t]) ** 2
+                    )
             if compute_device.type == "mps":
                 torch.mps.synchronize()
             self.mlp_fit_time_ = time.perf_counter() - mlp_started
-            self.mlp_training_loss_ = float(loss.detach().cpu())
+            self.mlp_training_loss_ = float(restored_training_loss.cpu())
             self.mlp_best_validation_loss_ = best_validation_loss
             self.mlp_epochs_trained_ = epoch + 1
         self.fit_time_ = time.perf_counter() - fit_started

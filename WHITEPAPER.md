@@ -339,8 +339,8 @@ interface. Since all coordinates are optimized jointly, `transform` only
 returns stored coordinates when given the exact training matrix in its
 original row order. In the direct mode it raises an error for new or reordered
 rows. The estimator also offers an optional post-hoc MLP projection to
-approximate the optimized coordinates. The default has three hidden layers of
-256 units and 0.1 dropout. It uses a 10% validation split with at least 100
+approximate the optimized coordinates. The default has six hidden layers of
+128 units and 0.1 dropout. It uses a 10% validation split with at least 100
 epochs of training and a patience of 20. This learned regressor is an extension
 around the core IMSTE objective, not part of the embedding algorithm described
 here.

@@ -81,9 +81,10 @@ def display_interactive_embedding(
 
     Dataset choices load lazily and cache balanced sample pools with separate,
     disjoint training and novel rows. Controls configure sample count, MST
-    count, distance and loss shapes, and negative sampling. Attraction uses
-    fixed weight-sum normalization. Fits use 1,000 epochs and a 0.05 learning
-    rate. The embedding is fit only when the user clicks the fit button.
+    count, embedding batch size, distance and loss shapes, and negative
+    sampling. Attraction uses fixed weight-sum normalization. Fits use 1,000
+    epochs and a 0.05 learning rate. The embedding is fit only when the user
+    clicks the fit button.
     Returns widget references for notebook customization.
     """
     if max_instances < 500:
@@ -124,7 +125,7 @@ def display_interactive_embedding(
         f"({max_training_instances:,} training plus an equally sized novel pool). "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs, "
         "squared distance, log attraction, logistic repulsion, "
-        "weight_sum normalization, 1,000 epochs. "
+        "weight_sum normalization, 1,000 epochs, and an 8,192 embedding batch. "
         "Click Fit embedding to run."
     )
 
@@ -134,6 +135,15 @@ def display_interactive_embedding(
         max=max_training_instances,
         step=250,
         description="Instances",
+        continuous_update=False,
+        style={"description_width": "initial"},
+    )
+    batch_size = widgets.IntSlider(
+        value=8192,
+        min=256,
+        max=16384,
+        step=256,
+        description="Embedding batch size",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -235,7 +245,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     mlp_n_layers = widgets.IntSlider(
-        value=3,
+        value=6,
         min=1,
         max=10,
         step=1,
@@ -244,7 +254,7 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     mlp_layer_size = widgets.IntSlider(
-        value=256,
+        value=128,
         min=32,
         max=512,
         step=32,
@@ -431,9 +441,10 @@ def display_interactive_embedding(
         compute_knn.value = False
         filter_2d_knn.value = False
         filter_n_neighbors.value = 5
+        batch_size.value = 8192
         transform_method.value = "direct"
-        mlp_n_layers.value = 3
-        mlp_layer_size.value = 256
+        mlp_n_layers.value = 6
+        mlp_layer_size.value = 128
         mlp_dropout.value = 0.1
         device.value = device_default
 
@@ -461,7 +472,7 @@ def display_interactive_embedding(
                     n_msts=n_msts.value,
                     n_components=2,
                     n_epochs=1000,
-                    batch_size=8192,
+                    batch_size=batch_size.value,
                     learning_rate=0.05,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
@@ -609,6 +620,7 @@ def display_interactive_embedding(
         [
             widgets.HBox([dataset]),
             widgets.HBox([sample_count, n_msts]),
+            widgets.HBox([batch_size]),
             widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([distance_type]),
             widgets.HBox([attraction_dampening, repulsion_type]),
@@ -637,6 +649,7 @@ def display_interactive_embedding(
         "sliders": {
             "dataset": dataset,
             "sample_count": sample_count,
+            "batch_size": batch_size,
             "n_msts": n_msts,
             "lambda_rep": lambda_rep,
             "distance_type": distance_type,

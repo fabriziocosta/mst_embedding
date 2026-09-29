@@ -85,7 +85,7 @@ visualization.
 By default, `transform` returns the fitted coordinates only for the original
 training matrix. To project unseen rows, set `transform_method="mlp"`. After
 optimizing the embedding, the estimator trains a standard MLP to predict those
-coordinates. Its defaults are three hidden layers of 256 units with 0.1 dropout.
+coordinates. Its defaults are six hidden layers of 128 units with 0.1 dropout.
 It standardizes its inputs and targets and uses a shuffled 10% validation split
 for early stopping. The best validation checkpoint is restored, then
 predictions are returned in the embedding's original coordinate scale.
@@ -95,8 +95,8 @@ from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 mapper = IteratedMinimumSpanningTreeEmbedder(
     transform_method="mlp",
-    mlp_n_layers=3,
-    mlp_layer_size=256,
+    mlp_n_layers=6,
+    mlp_layer_size=128,
     mlp_dropout=0.1,
     mlp_min_epochs=100,
     mlp_patience=20,
@@ -140,7 +140,7 @@ The main parameters are `n_msts=10`, `distance_type="squared"`,
 `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Projection parameters are `transform_method="direct"`,
-`mlp_n_layers=3`, `mlp_layer_size=256`, `mlp_dropout=0.1`, `mlp_epochs=200`,
+`mlp_n_layers=6`, `mlp_layer_size=128`, `mlp_dropout=0.1`, `mlp_epochs=200`,
 `mlp_min_epochs=100`, `mlp_patience=20`,
 `mlp_batch_size=256`, and `mlp_learning_rate=0.001`. Edge weights decay by MST
 rank as `1 / rank`, so later trees receive smaller weights. `negative_ratio` samples
