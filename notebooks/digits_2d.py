@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from IPython.display import HTML, clear_output, display
 from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
 try:  # Notebook execution puts this directory directly on sys.path.
@@ -219,25 +219,6 @@ def display_interactive_embedding(
         description="Estimate 5-fold 5-NN accuracy",
         indent=False,
     )
-    filter_2d_knn = widgets.Checkbox(
-        value=False,
-        description="Highlight same-class neighbors",
-        tooltip=(
-            "Points whose selected number of nearest neighbors in the 2D "
-            "embedding do not all share their class label appear in light "
-            "gray underneath the highlighted points."
-        ),
-        indent=False,
-    )
-    filter_n_neighbors = widgets.IntSlider(
-        value=5,
-        min=1,
-        max=20,
-        step=1,
-        description="Filter neighbors",
-        continuous_update=False,
-        style={"description_width": "initial"},
-    )
     transform_method = widgets.Dropdown(
         options=[("Direct (training rows only)", "direct"), ("MLP projection", "mlp")],
         value="direct",
@@ -439,8 +420,6 @@ def display_interactive_embedding(
         logistic_temperature.value = 0.5
         negative_ratio.value = 5
         compute_knn.value = False
-        filter_2d_knn.value = False
-        filter_n_neighbors.value = 5
         batch_size.value = 8192
         transform_method.value = "direct"
         mlp_n_layers.value = 6
@@ -518,21 +497,6 @@ def display_interactive_embedding(
                         cv=cv,
                     ).mean()
                     knn_title = f" · 5-NN 5-fold CV accuracy={knn_accuracy:.3f}"
-                if filter_2d_knn.value:
-                    neighbors = NearestNeighbors(
-                        n_neighbors=filter_n_neighbors.value
-                    ).fit(
-                        embedding
-                    ).kneighbors(return_distance=False)
-                    plot_mask = np.all(labels[neighbors] == labels[:, None], axis=1)
-                    filter_title = (
-                        f" · 2D {filter_n_neighbors.value}-NN filter="
-                        f"{int(plot_mask.sum()):,}/"
-                        f"{n_samples:,}"
-                    )
-                else:
-                    plot_mask = np.ones(n_samples, dtype=bool)
-                    filter_title = ""
                 logistic_title = ""
                 if (
                     attraction_dampening.value == "logistic"
@@ -544,20 +508,10 @@ def display_interactive_embedding(
                     )
 
                 fig, ax = plt.subplots(figsize=(8, 6))
-                if filter_2d_knn.value:
-                    ax.scatter(
-                        embedding[~plot_mask, 0],
-                        embedding[~plot_mask, 1],
-                        c="lightgray",
-                        s=10,
-                        alpha=0.3,
-                        linewidths=0,
-                        zorder=1,
-                    )
                 points = ax.scatter(
-                    embedding[plot_mask, 0],
-                    embedding[plot_mask, 1],
-                    c=labels[plot_mask],
+                    embedding[:, 0],
+                    embedding[:, 1],
+                    c=labels,
                     cmap="tab10",
                     vmin=-0.5,
                     vmax=9.5,
@@ -574,7 +528,7 @@ def display_interactive_embedding(
                         f"{distance_type.value} distance · "
                         f"{attraction_dampening.value} attraction · "
                         f"{repulsion_type.value} repulsion · weight_sum · "
-                        f"1,000 epochs{logistic_title}{filter_title}{knn_title}"
+                        f"1,000 epochs{logistic_title}{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
                     ylabel="Embedding dimension 2",
@@ -590,12 +544,6 @@ def display_interactive_embedding(
                     )
                 )
                 status.value = "Embedding ready. "
-                if filter_2d_knn.value:
-                    status.value += (
-                        f"The 2D {filter_n_neighbors.value}-NN display filter "
-                        f"highlighted {int(plot_mask.sum()):,} of "
-                        f"{n_samples:,} points. "
-                    )
                 if not compute_knn.value:
                     status.value += "The optional cross-validation estimate was skipped. "
                 if transform_method.value == "mlp":
@@ -625,7 +573,7 @@ def display_interactive_embedding(
             widgets.HBox([distance_type]),
             widgets.HBox([attraction_dampening, repulsion_type]),
             widgets.HBox([logistic_margin, logistic_temperature]),
-            widgets.HBox([compute_knn, filter_2d_knn, filter_n_neighbors]),
+            widgets.HBox([compute_knn]),
             widgets.HBox([transform_method]),
             widgets.HBox([mlp_n_layers, mlp_layer_size, mlp_dropout]),
             widgets.HBox([device]),
@@ -659,8 +607,6 @@ def display_interactive_embedding(
             "logistic_temperature": logistic_temperature,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
-            "filter_2d_knn": filter_2d_knn,
-            "filter_n_neighbors": filter_n_neighbors,
             "transform_method": transform_method,
             "mlp_n_layers": mlp_n_layers,
             "mlp_layer_size": mlp_layer_size,

@@ -67,6 +67,59 @@ def test_transform_rejects_new_or_reordered_rows():
         estimator.transform(np.vstack([X, [3.0, 3.0]]))
 
 
+def test_mlp_projection_fits_and_transforms_unseen_rows():
+    X = small_data()
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        n_msts=1,
+        n_epochs=0,
+        transform_method="mlp",
+        mlp_n_layers=1,
+        mlp_layer_size=8,
+        mlp_dropout=0.0,
+        mlp_epochs=4,
+        mlp_min_epochs=2,
+        mlp_patience=2,
+        mlp_batch_size=2,
+        random_state=11,
+    ).fit(X)
+
+    prediction = estimator.transform([[3.0, 3.0]])
+    assert prediction.shape == (1, 2)
+    assert np.isfinite(prediction).all()
+    assert 2 <= estimator.mlp_epochs_trained_ <= 4
+    assert np.isfinite(estimator.mlp_best_validation_loss_)
+    assert np.isfinite(estimator.mlp_training_loss_)
+
+
+def test_dataframe_transform_rejects_reordered_feature_names():
+    pd = pytest.importorskip("pandas")
+    X = pd.DataFrame(small_data(), columns=["left", "right"])
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        n_msts=1, n_epochs=0, random_state=3
+    ).fit(X)
+
+    with pytest.raises(ValueError, match="same feature names in the same order"):
+        estimator.transform(X[["right", "left"]])
+
+
+def test_custom_loss_must_depend_on_supplied_distances():
+    def disconnected_attraction(positive_squared_distances, edge_weights):
+        del edge_weights
+        return torch.ones(
+            (), device=positive_squared_distances.device, requires_grad=True
+        )
+
+    with pytest.raises(ValueError, match="must depend on the supplied distances"):
+        IteratedMinimumSpanningTreeEmbedder(
+            n_msts=1,
+            n_epochs=1,
+            batch_size=100,
+            negative_ratio=0,
+            attraction_loss_fn=disconnected_attraction,
+            random_state=5,
+        ).fit(small_data())
+
+
 def test_duplicate_samples_keep_zero_distance_mst_edges():
     X = np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
     estimator = IteratedMinimumSpanningTreeEmbedder(n_msts=1, n_epochs=2, random_state=2).fit(X)

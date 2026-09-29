@@ -66,11 +66,24 @@ def _resolve_device(requested: str, n_samples: int) -> torch.device:
     return torch.device("cpu")
 
 
-def _validate_loss_output(name: str, value: object) -> torch.Tensor:
+def _validate_loss_output(
+    name: str,
+    value: object,
+    distances: torch.Tensor,
+    *,
+    check_dependency: bool = False,
+) -> torch.Tensor:
     if not isinstance(value, torch.Tensor) or value.ndim != 0 or not value.requires_grad:
         raise ValueError(
             f"{name} must return a scalar torch.Tensor that is differentiable "
             "with respect to the supplied distances."
+        )
+    if check_dependency and torch.autograd.grad(
+        value, distances, retain_graph=True, allow_unused=True
+    )[0] is None:
+        raise ValueError(
+            f"{name} must depend on the supplied distances so gradients can "
+            "reach the embedding coordinates."
         )
     return value
 
@@ -398,6 +411,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         edges, edge_weights = _iterated_mst_edges(
             distances, n_msts
         )
+        del distances
         self.graph_construction_time_ = time.perf_counter() - graph_started
 
         embedding_started = time.perf_counter()
@@ -423,24 +437,29 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             attraction_scale = len(edge_weights) / float(np.sum(edge_weights))
         edge_sources = edge_array[:, 0]
         edge_targets = edge_array[:, 1]
-        adjacency = np.zeros((n_samples, n_samples), dtype=bool)
-        adjacency[edge_sources, edge_targets] = True
-        adjacency[edge_targets, edge_sources] = True
+        packed_adjacency = np.zeros(
+            (n_samples, (n_samples + 7) // 8), dtype=np.uint8
+        )
         sample_ids = np.arange(n_samples)
-        negative_counts = np.count_nonzero(
-            ~adjacency & (sample_ids[None, :] != sample_ids[:, None]), axis=1
+        np.bitwise_or.at(
+            packed_adjacency,
+            (sample_ids, sample_ids >> 3),
+            (1 << (sample_ids & 7)).astype(np.uint8),
         )
-        max_negative_count = int(negative_counts.max(initial=0))
-        index_dtype = np.int32 if n_samples <= np.iinfo(np.int32).max else np.intp
-        negative_candidates = np.empty(
-            (n_samples, max_negative_count), dtype=index_dtype
+        np.bitwise_or.at(
+            packed_adjacency,
+            (edge_sources, edge_targets >> 3),
+            (1 << (edge_targets & 7)).astype(np.uint8),
         )
-        for sample_id in range(n_samples):
-            candidates = np.flatnonzero(
-                ~adjacency[sample_id] & (sample_ids != sample_id)
-            )
-            negative_candidates[sample_id, : candidates.size] = candidates
-        del adjacency, sample_ids
+        np.bitwise_or.at(
+            packed_adjacency,
+            (edge_targets, edge_sources >> 3),
+            (1 << (edge_sources & 7)).astype(np.uint8),
+        )
+        node_degrees = np.bincount(
+            np.concatenate((edge_sources, edge_targets)), minlength=n_samples
+        )
+        negative_counts = n_samples - 1 - node_degrees
 
         for _ in range(n_epochs):
             order = rng.permutation(len(edge_array))
@@ -474,7 +493,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 else:
                     attraction_value = attraction_loss_fn(positive_d2, weights_t)
                 attraction = _validate_loss_output(
-                    "attraction_loss_fn", attraction_value
+                    "attraction_loss_fn",
+                    attraction_value,
+                    positive_d2 if not use_builtin_attraction_loss else positive_distance,
+                    check_dependency=not use_builtin_attraction_loss,
                 )
 
                 # Positive edges are undirected, so both endpoints contribute
@@ -484,15 +506,24 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                     negative_counts[edge_endpoints] > 0
                 ]
                 if negative_ratio and eligible_sources.size:
-                    eligible_counts = negative_counts[eligible_sources]
-                    sampled_offsets = (
-                        rng.random_sample((eligible_sources.size, negative_ratio))
-                        * eligible_counts[:, None]
-                    ).astype(np.intp)
-                    negative_targets = negative_candidates[
-                        eligible_sources[:, None], sampled_offsets
-                    ].reshape(-1)
                     negative_sources = np.repeat(eligible_sources, negative_ratio)
+                    negative_targets = rng.randint(
+                        n_samples, size=negative_sources.size
+                    )
+                    invalid = np.ones(negative_targets.size, dtype=bool)
+                    while np.any(invalid):
+                        blocked = packed_adjacency[
+                            negative_sources[invalid],
+                            negative_targets[invalid] >> 3,
+                        ]
+                        bit_mask = 1 << (negative_targets[invalid] & 7)
+                        invalid_indices = np.flatnonzero(invalid)
+                        accepted = (blocked & bit_mask) == 0
+                        invalid[invalid_indices[accepted]] = False
+                        invalid_indices = invalid_indices[~accepted]
+                        negative_targets[invalid_indices] = rng.randint(
+                            n_samples, size=invalid_indices.size
+                        )
                     ni = torch.as_tensor(
                         negative_sources, dtype=torch.long, device=compute_device
                     )
@@ -518,6 +549,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                     repulsion = _validate_loss_output(
                         "repulsion_loss_fn",
                         negative_loss,
+                        negative_d2
+                        if self.repulsion_loss_fn is not None
+                        else negative_distance,
+                        check_dependency=self.repulsion_loss_fn is not None,
                     )
                 else:
                     # Some small or dense graphs have no eligible negatives.
@@ -660,6 +695,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     def transform(self, X: object) -> np.ndarray:
         """Return fitted coordinates or project new rows with the selected model."""
         check_is_fitted(self, attributes=["embedding_", "X_fit_"])
+        self._check_feature_names(X)
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
         if X_checked.shape[1] != self.n_features_in_:
             raise ValueError(
@@ -676,12 +712,31 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 "the same order when transform_method='direct'. Set "
                 "transform_method='mlp' to project new rows."
             )
-        return self.transform_with_mlp(X_checked)
+        return self._transform_with_mlp_checked(X_checked)
 
     def transform_with_mlp(self, X: object) -> np.ndarray:
         """Apply the fitted MLP projection, including to training rows."""
         check_is_fitted(self, attributes=["mlp_"])
+        self._check_feature_names(X)
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
+        return self._transform_with_mlp_checked(X_checked)
+
+    def _check_feature_names(self, X: object) -> None:
+        fitted_names = getattr(self, "feature_names_in_", None)
+        if fitted_names is None:
+            return
+        input_columns = getattr(X, "columns", None)
+        if input_columns is None:
+            raise ValueError(
+                "X must be a DataFrame with the same named columns used during fit."
+            )
+        input_names = np.asarray(input_columns, dtype=object)
+        if not np.array_equal(input_names, fitted_names):
+            raise ValueError(
+                "X must have the same feature names in the same order as during fit."
+            )
+
+    def _transform_with_mlp_checked(self, X_checked: np.ndarray) -> np.ndarray:
         if X_checked.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {X_checked.shape[1]} features, but this estimator was fitted "
