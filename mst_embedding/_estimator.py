@@ -75,40 +75,23 @@ def _validate_loss_output(name: str, value: object) -> torch.Tensor:
     return value
 
 
-class _ResidualBlock(nn.Module):
-    """A fully connected residual block with dropout on its update."""
-
-    def __init__(self, width: int, dropout: float) -> None:
-        super().__init__()
-        self.linear1 = nn.Linear(width, width)
-        self.linear2 = nn.Linear(width, width)
-        self.activation = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        update = self.linear1(inputs)
-        update = self.dropout(self.activation(update))
-        update = self.linear2(update)
-        return self.activation(inputs + self.dropout(update))
-
-
-class _ResidualProjector(nn.Module):
+class _MLPProjector(nn.Module):
     """Map standardized input features to standardized embedding coordinates."""
 
     def __init__(
-        self, n_features: int, n_components: int, width: int, n_layers: int, dropout: float
+        self, n_features: int, n_components: int, n_layers: int, width: int, dropout: float
     ) -> None:
         super().__init__()
-        self.input_layer = nn.Linear(n_features, width)
-        self.activation = nn.ReLU()
-        self.blocks = nn.Sequential(
-            *(_ResidualBlock(width, dropout) for _ in range(n_layers))
-        )
-        self.output_layer = nn.Linear(width, n_components)
+        layers: list[nn.Module] = []
+        in_features = n_features
+        for _ in range(n_layers):
+            layers.extend((nn.Linear(in_features, width), nn.ReLU(), nn.Dropout(dropout)))
+            in_features = width
+        layers.append(nn.Linear(in_features, n_components))
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        hidden = self.activation(self.input_layer(inputs))
-        return self.output_layer(self.blocks(hidden))
+        return self.layers(inputs)
 
 
 def _squared_euclidean_distance(delta: torch.Tensor) -> torch.Tensor:
@@ -180,8 +163,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
     The learned coordinates are attached to the training rows. By default,
     :meth:`transform` accepts only the original training matrix in its original
-    row order. Set ``transform_method="resnet"`` to learn a residual-network
-    projection for new rows.
+    row order. Set ``transform_method="mlp"`` to learn an MLP projection for new rows.
 
     Parameters
     ----------
@@ -225,24 +207,28 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Metal Performance Shaders (MPS) backend on macOS for datasets with at
         least 2048 samples; smaller datasets use the CPU to avoid GPU launch
         overhead. Explicitly select ``mps`` or ``cpu`` to override this choice.
-    transform_method : {'direct', 'resnet'}, default='direct'
+    transform_method : {'direct', 'mlp'}, default='direct'
         ``'direct'`` returns fitted coordinates for the original training rows
-        and rejects new rows. ``'resnet'`` additionally fits a residual network
-        to the learned coordinates and uses it to transform new rows.
-    resnet_n_layers : int, default=3
-        Number of fully connected residual blocks in the projection network.
-    resnet_layer_size : int, default=256
-        Hidden width used by the projection network and its residual blocks.
-    resnet_dropout : float, default=0.1
-        Dropout probability in each residual block; must be in ``[0, 1)``.
-    resnet_epochs : int, default=200
-        Number of epochs used to fit the projection network.
-    resnet_batch_size : int, default=256
+        and rejects new rows. ``'mlp'`` fits an MLP to the learned coordinates
+        and uses it to transform new rows. Its defaults are three 256-unit
+        hidden layers with 0.1 dropout.
+    mlp_n_layers : int, default=3
+        Number of hidden layers in the projection MLP.
+    mlp_layer_size : int, default=256
+        Number of units in each MLP hidden layer.
+    mlp_dropout : float, default=0.1
+        Dropout probability after each hidden layer; must be in ``[0, 1)``.
+    mlp_epochs : int, default=200
+        Maximum epochs used to fit the projection MLP.
+    mlp_min_epochs : int, default=100
+        Minimum epochs to train before early stopping can occur.
+    mlp_patience : int, default=20
+        Stop after this many epochs without validation improvement, once the
+        minimum epoch count has been reached.
+    mlp_batch_size : int, default=256
         Number of training rows per projection-network update.
-    resnet_learning_rate : float, default=0.001
-        AdamW learning rate for the projection network.
-    resnet_weight_decay : float, default=0.0001
-        AdamW L2 weight decay for the projection network.
+    mlp_learning_rate : float, default=0.001
+        Adam learning rate for the projection network.
     attraction_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(positive_squared_distances,
         edge_weights)`` that returns a scalar differentiable PyTorch tensor.
@@ -281,13 +267,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
         repulsion_type: str = "logistic",
         transform_method: str = "direct",
-        resnet_n_layers: int = 3,
-        resnet_layer_size: int = 256,
-        resnet_dropout: float = 0.1,
-        resnet_epochs: int = 200,
-        resnet_batch_size: int = 256,
-        resnet_learning_rate: float = 0.001,
-        resnet_weight_decay: float = 0.0001,
+        mlp_n_layers: int = 3,
+        mlp_layer_size: int = 256,
+        mlp_dropout: float = 0.1,
+        mlp_epochs: int = 200,
+        mlp_min_epochs: int = 100,
+        mlp_patience: int = 20,
+        mlp_batch_size: int = 256,
+        mlp_learning_rate: float = 0.001,
     ) -> None:
         self.n_msts = n_msts
         self.attraction_normalization = attraction_normalization
@@ -308,13 +295,14 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.repulsion_loss_fn = repulsion_loss_fn
         self.repulsion_type = repulsion_type
         self.transform_method = transform_method
-        self.resnet_n_layers = resnet_n_layers
-        self.resnet_layer_size = resnet_layer_size
-        self.resnet_dropout = resnet_dropout
-        self.resnet_epochs = resnet_epochs
-        self.resnet_batch_size = resnet_batch_size
-        self.resnet_learning_rate = resnet_learning_rate
-        self.resnet_weight_decay = resnet_weight_decay
+        self.mlp_n_layers = mlp_n_layers
+        self.mlp_layer_size = mlp_layer_size
+        self.mlp_dropout = mlp_dropout
+        self.mlp_epochs = mlp_epochs
+        self.mlp_min_epochs = mlp_min_epochs
+        self.mlp_patience = mlp_patience
+        self.mlp_batch_size = mlp_batch_size
+        self.mlp_learning_rate = mlp_learning_rate
 
     def fit(self, X: object, y: object = None) -> "IteratedMinimumSpanningTreeEmbedder":
         """Fit the embedding and store coordinates for the input rows.
@@ -325,27 +313,22 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         fit_started = time.perf_counter()
         del y  # Unsupervised: labels are intentionally never used.
         n_msts = _positive_integer("n_msts", self.n_msts)
-        if self.transform_method not in {"direct", "resnet"}:
-            raise ValueError("transform_method must be 'direct' or 'resnet'.")
-        resnet_n_layers = _positive_integer("resnet_n_layers", self.resnet_n_layers)
-        resnet_layer_size = _positive_integer(
-            "resnet_layer_size", self.resnet_layer_size
+        if self.transform_method not in {"direct", "mlp"}:
+            raise ValueError("transform_method must be 'direct' or 'mlp'.")
+        mlp_n_layers = _positive_integer("mlp_n_layers", self.mlp_n_layers)
+        mlp_layer_size = _positive_integer("mlp_layer_size", self.mlp_layer_size)
+        mlp_dropout = _finite_nonnegative("mlp_dropout", self.mlp_dropout)
+        if mlp_dropout >= 1:
+            raise ValueError("mlp_dropout must be a finite number in [0, 1).")
+        mlp_epochs = _positive_integer("mlp_epochs", self.mlp_epochs)
+        mlp_min_epochs = _positive_integer("mlp_min_epochs", self.mlp_min_epochs)
+        mlp_patience = _positive_integer("mlp_patience", self.mlp_patience)
+        mlp_batch_size = _positive_integer("mlp_batch_size", self.mlp_batch_size)
+        mlp_learning_rate = _finite_nonnegative(
+            "mlp_learning_rate", self.mlp_learning_rate, strictly_positive=True
         )
-        resnet_epochs = _positive_integer("resnet_epochs", self.resnet_epochs)
-        resnet_batch_size = _positive_integer(
-            "resnet_batch_size", self.resnet_batch_size
-        )
-        resnet_learning_rate = _finite_nonnegative(
-            "resnet_learning_rate", self.resnet_learning_rate, strictly_positive=True
-        )
-        resnet_weight_decay = _finite_nonnegative(
-            "resnet_weight_decay", self.resnet_weight_decay
-        )
-        resnet_dropout = _finite_nonnegative(
-            "resnet_dropout", self.resnet_dropout
-        )
-        if resnet_dropout >= 1:
-            raise ValueError("resnet_dropout must be a finite number in [0, 1).")
+        if mlp_min_epochs > mlp_epochs:
+            raise ValueError("mlp_min_epochs must not exceed mlp_epochs.")
         if self.attraction_normalization != "weight_sum":
             raise ValueError("attraction_normalization must be 'weight_sum'.")
         if self.distance_type not in {"euclidean", "squared"}:
@@ -560,71 +543,108 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.graph_edges_ = edge_array.copy()
         self.graph_weights_ = edge_weights.copy()
         for attribute in (
-            "resnet_",
-            "resnet_X_mean_",
-            "resnet_X_scale_",
-            "resnet_embedding_mean_",
-            "resnet_embedding_scale_",
-            "resnet_fit_time_",
-            "resnet_training_loss_",
+            "mlp_",
+            "mlp_X_mean_",
+            "mlp_X_scale_",
+            "mlp_embedding_mean_",
+            "mlp_embedding_scale_",
+            "mlp_fit_time_",
+            "mlp_training_loss_",
+            "mlp_best_validation_loss_",
+            "mlp_epochs_trained_",
         ):
             if hasattr(self, attribute):
                 delattr(self, attribute)
-        if self.transform_method == "resnet":
-            resnet_started = time.perf_counter()
-            self.resnet_X_mean_ = X_checked.mean(axis=0)
-            self.resnet_X_scale_ = X_checked.std(axis=0)
-            self.resnet_X_scale_[self.resnet_X_scale_ == 0.0] = 1.0
-            self.resnet_embedding_mean_ = self.embedding_.mean(axis=0)
-            self.resnet_embedding_scale_ = self.embedding_.std(axis=0)
-            self.resnet_embedding_scale_[self.resnet_embedding_scale_ == 0.0] = 1.0
+        if self.transform_method == "mlp":
+            mlp_started = time.perf_counter()
+            validation_size = max(1, int(np.ceil(0.1 * n_samples)))
+            if validation_size >= n_samples:
+                raise ValueError("MLP projection requires at least two training rows.")
+            split_order = rng.permutation(n_samples)
+            validation_indices = split_order[:validation_size]
+            training_indices = split_order[validation_size:]
 
-            X_resnet = np.asarray(
-                (X_checked - self.resnet_X_mean_) / self.resnet_X_scale_,
+            X_training = X_checked[training_indices]
+            embedding_training = self.embedding_[training_indices]
+            self.mlp_X_mean_ = X_training.mean(axis=0)
+            self.mlp_X_scale_ = X_training.std(axis=0)
+            self.mlp_X_scale_[self.mlp_X_scale_ == 0.0] = 1.0
+            self.mlp_embedding_mean_ = embedding_training.mean(axis=0)
+            self.mlp_embedding_scale_ = embedding_training.std(axis=0)
+            self.mlp_embedding_scale_[self.mlp_embedding_scale_ == 0.0] = 1.0
+
+            X_mlp = np.asarray(
+                (X_checked - self.mlp_X_mean_) / self.mlp_X_scale_,
                 dtype=np.float32,
             )
-            y_resnet = np.asarray(
-                (self.embedding_ - self.resnet_embedding_mean_)
-                / self.resnet_embedding_scale_,
+            y_mlp = np.asarray(
+                (self.embedding_ - self.mlp_embedding_mean_)
+                / self.mlp_embedding_scale_,
                 dtype=np.float32,
             )
-            X_resnet_t = torch.as_tensor(X_resnet, device=compute_device)
-            y_resnet_t = torch.as_tensor(y_resnet, device=compute_device)
-            resnet_seed = int(rng.randint(0, np.iinfo(np.int32).max))
+            X_mlp_t = torch.as_tensor(X_mlp, device=compute_device)
+            y_mlp_t = torch.as_tensor(y_mlp, device=compute_device)
+            validation_indices_t = torch.as_tensor(
+                validation_indices, dtype=torch.long, device=compute_device
+            )
+            mlp_seed = int(rng.randint(0, np.iinfo(np.int32).max))
             with torch.random.fork_rng(devices=[]):
-                torch.manual_seed(resnet_seed)
-                self.resnet_ = _ResidualProjector(
-                    X_checked.shape[1],
-                    n_components,
-                    resnet_layer_size,
-                    resnet_n_layers,
-                    resnet_dropout,
+                torch.manual_seed(mlp_seed)
+                self.mlp_ = _MLPProjector(
+                    X_checked.shape[1], n_components, mlp_n_layers,
+                    mlp_layer_size, mlp_dropout
                 ).to(compute_device)
-                resnet_optimizer = torch.optim.AdamW(
-                    self.resnet_.parameters(),
-                    lr=resnet_learning_rate,
-                    weight_decay=resnet_weight_decay,
+                mlp_optimizer = torch.optim.Adam(
+                    self.mlp_.parameters(), lr=mlp_learning_rate
                 )
-                self.resnet_.train()
-                for _ in range(resnet_epochs):
-                    order = rng.permutation(n_samples)
-                    for start in range(0, n_samples, resnet_batch_size):
-                        batch = order[start : start + resnet_batch_size]
+                best_validation_loss = float("inf")
+                best_state = None
+                epochs_without_improvement = 0
+                self.mlp_.train()
+                for epoch in range(mlp_epochs):
+                    order = rng.permutation(training_indices)
+                    for start in range(0, len(order), mlp_batch_size):
+                        batch = order[start : start + mlp_batch_size]
                         batch_t = torch.as_tensor(
                             batch, dtype=torch.long, device=compute_device
                         )
-                        prediction = self.resnet_(X_resnet_t[batch_t])
-                        loss = torch.mean(
-                            (prediction - y_resnet_t[batch_t]) ** 2
-                        )
-                        resnet_optimizer.zero_grad(set_to_none=True)
+                        prediction = self.mlp_(X_mlp_t[batch_t])
+                        loss = torch.mean((prediction - y_mlp_t[batch_t]) ** 2)
+                        mlp_optimizer.zero_grad(set_to_none=True)
                         loss.backward()
-                        resnet_optimizer.step()
-                self.resnet_.eval()
+                        mlp_optimizer.step()
+                    self.mlp_.eval()
+                    with torch.no_grad():
+                        validation_prediction = self.mlp_(X_mlp_t[validation_indices_t])
+                        validation_loss = float(
+                            torch.mean(
+                                (validation_prediction - y_mlp_t[validation_indices_t]) ** 2
+                            ).cpu()
+                        )
+                    self.mlp_.train()
+                    if validation_loss < best_validation_loss:
+                        best_validation_loss = validation_loss
+                        best_state = {
+                            key: value.detach().clone()
+                            for key, value in self.mlp_.state_dict().items()
+                        }
+                        epochs_without_improvement = 0
+                    else:
+                        epochs_without_improvement += 1
+                    if (
+                        epoch + 1 >= mlp_min_epochs
+                        and epochs_without_improvement >= mlp_patience
+                    ):
+                        break
+                if best_state is not None:
+                    self.mlp_.load_state_dict(best_state)
+                self.mlp_.eval()
             if compute_device.type == "mps":
                 torch.mps.synchronize()
-            self.resnet_fit_time_ = time.perf_counter() - resnet_started
-            self.resnet_training_loss_ = float(loss.detach().cpu())
+            self.mlp_fit_time_ = time.perf_counter() - mlp_started
+            self.mlp_training_loss_ = float(loss.detach().cpu())
+            self.mlp_best_validation_loss_ = best_validation_loss
+            self.mlp_epochs_trained_ = epoch + 1
         self.fit_time_ = time.perf_counter() - fit_started
         return self
 
@@ -641,39 +661,39 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             X_checked, self.X_fit_
         ):
             return self.embedding_.copy()
-        if self.transform_method != "resnet":
+        if self.transform_method != "mlp":
             raise ValueError(
                 "transform is available only for the original training rows in "
                 "the same order when transform_method='direct'. Set "
-                "transform_method='resnet' to project new rows."
+                "transform_method='mlp' to project new rows."
             )
-        return self.transform_with_resnet(X_checked)
+        return self.transform_with_mlp(X_checked)
 
-    def transform_with_resnet(self, X: object) -> np.ndarray:
-        """Apply the fitted ResNet projection, including to training rows."""
-        check_is_fitted(self, attributes=["resnet_"])
+    def transform_with_mlp(self, X: object) -> np.ndarray:
+        """Apply the fitted MLP projection, including to training rows."""
+        check_is_fitted(self, attributes=["mlp_"])
         X_checked = check_array(X, dtype=np.float64, ensure_2d=True)
         if X_checked.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {X_checked.shape[1]} features, but this estimator was fitted "
                 f"with {self.n_features_in_} features."
             )
-        X_resnet = np.asarray(
-            (X_checked - self.resnet_X_mean_) / self.resnet_X_scale_,
+        X_mlp = np.asarray(
+            (X_checked - self.mlp_X_mean_) / self.mlp_X_scale_,
             dtype=np.float32,
         )
         predictions: list[np.ndarray] = []
         device = torch.device(self.device_)
-        self.resnet_.eval()
+        self.mlp_.eval()
         with torch.no_grad():
-            for start in range(0, len(X_resnet), self.resnet_batch_size):
+            for start in range(0, len(X_mlp), self.mlp_batch_size):
                 batch = torch.as_tensor(
-                    X_resnet[start : start + self.resnet_batch_size],
+                    X_mlp[start : start + self.mlp_batch_size],
                     device=device,
                 )
-                predictions.append(self.resnet_(batch).cpu().numpy())
+                predictions.append(self.mlp_(batch).cpu().numpy())
         transformed = np.concatenate(predictions, axis=0).astype(np.float64)
         return (
-            transformed * self.resnet_embedding_scale_
-            + self.resnet_embedding_mean_
+            transformed * self.mlp_embedding_scale_
+            + self.mlp_embedding_mean_
         )

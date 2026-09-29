@@ -229,35 +229,35 @@ def display_interactive_embedding(
         style={"description_width": "initial"},
     )
     transform_method = widgets.Dropdown(
-        options=[("Direct (training rows only)", "direct"), ("ResNet", "resnet")],
+        options=[("Direct (training rows only)", "direct"), ("MLP projection", "mlp")],
         value="direct",
         description="Transform",
         style={"description_width": "initial"},
     )
-    resnet_n_layers = widgets.IntSlider(
+    mlp_n_layers = widgets.IntSlider(
         value=3,
         min=1,
         max=10,
         step=1,
-        description="ResNet layers",
+        description="MLP layers",
         continuous_update=False,
         style={"description_width": "initial"},
     )
-    resnet_layer_size = widgets.IntSlider(
+    mlp_layer_size = widgets.IntSlider(
         value=256,
         min=32,
         max=512,
         step=32,
-        description="ResNet width",
+        description="Units per layer",
         continuous_update=False,
         style={"description_width": "initial"},
     )
-    resnet_dropout = widgets.FloatSlider(
+    mlp_dropout = widgets.FloatSlider(
         value=0.1,
         min=0.0,
         max=0.5,
         step=0.05,
-        description="ResNet dropout",
+        description="MLP dropout",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -285,8 +285,8 @@ def display_interactive_embedding(
         tooltip="Restore default values",
         icon="undo",
     )
-    resnet_button = widgets.Button(
-        description="Show ResNet predictions",
+    mlp_button = widgets.Button(
+        description="Show MLP predictions",
         tooltip=(
             "Compare the training embedding with predictions for a disjoint, "
             "same-size batch from the same dataset."
@@ -298,7 +298,7 @@ def display_interactive_embedding(
     projection_output = widgets.Output()
     current_fit: dict[str, object] = {}
 
-    def show_resnet_predictions(_=None) -> None:
+    def show_mlp_predictions(_=None) -> None:
         fitted = current_fit
         if not fitted:
             return
@@ -309,7 +309,7 @@ def display_interactive_embedding(
             novel_X = fitted["novel_X"]
             novel_labels = fitted["novel_labels"]
             embedding = fitted["embedding"]
-            predicted = estimator.transform_with_resnet(novel_X)
+            predicted = estimator.transform_with_mlp(novel_X)
 
             fig, axes = plt.subplots(
                 1, 2, figsize=(13, 5.5), sharex=True, sharey=True,
@@ -318,7 +318,7 @@ def display_interactive_embedding(
             for ax, coordinates, title in zip(
                 axes,
                 (embedding, predicted),
-                ("Optimized training embedding", "ResNet predictions (novel rows)"),
+                ("Optimized training embedding", "MLP predictions (novel rows)"),
             ):
                 if ax is axes[1]:
                     ax.scatter(
@@ -370,24 +370,24 @@ def display_interactive_embedding(
                 pad=0.03,
             )
             fig.suptitle(
-                f"{DATASET_LABELS[fitted['dataset']]} · ResNet prediction on "
+                f"{DATASET_LABELS[fitted['dataset']]} · MLP prediction on "
                 f"{len(novel_labels):,} novel rows"
             )
             display(fig)
             plt.close(fig)
 
-    def update_resnet_button(*_) -> None:
-        resnet_button.disabled = not (
+    def update_mlp_button(*_) -> None:
+        mlp_button.disabled = not (
             current_fit
-            and current_fit.get("transform_method") == "resnet"
-            and transform_method.value == "resnet"
+            and current_fit.get("transform_method") == "mlp"
+            and transform_method.value == "mlp"
         )
 
     def select_dataset(change) -> None:
         selected = change["new"]
         previous = active_dataset["name"]
         fit_button.disabled = True
-        resnet_button.disabled = True
+        mlp_button.disabled = True
         current_fit.clear()
         projection_output.clear_output(wait=True)
         status.value = f"Loading {DATASET_LABELS[selected]} sample pool..."
@@ -416,7 +416,7 @@ def display_interactive_embedding(
 
     def reset_sliders(_=None) -> None:
         current_fit.clear()
-        resnet_button.disabled = True
+        mlp_button.disabled = True
         projection_output.clear_output(wait=True)
         dataset.value = "mnist"
         sample_count.value = min(1000, sample_count.max)
@@ -432,14 +432,14 @@ def display_interactive_embedding(
         filter_2d_knn.value = False
         filter_n_neighbors.value = 5
         transform_method.value = "direct"
-        resnet_n_layers.value = 3
-        resnet_layer_size.value = 256
-        resnet_dropout.value = 0.1
+        mlp_n_layers.value = 3
+        mlp_layer_size.value = 256
+        mlp_dropout.value = 0.1
         device.value = device_default
 
     def fit_and_display(_=None) -> None:
         fit_button.disabled = True
-        resnet_button.disabled = True
+        mlp_button.disabled = True
         current_fit.clear()
         projection_output.clear_output(wait=True)
         status.value = "Fitting the 2D embedding with the selected settings..."
@@ -471,9 +471,11 @@ def display_interactive_embedding(
                     logistic_margin=logistic_margin.value,
                     logistic_temperature=logistic_temperature.value,
                     transform_method=transform_method.value,
-                    resnet_n_layers=resnet_n_layers.value,
-                    resnet_layer_size=resnet_layer_size.value,
-                    resnet_dropout=resnet_dropout.value,
+                    mlp_n_layers=mlp_n_layers.value,
+                    mlp_layer_size=mlp_layer_size.value,
+                    mlp_dropout=mlp_dropout.value,
+                    mlp_min_epochs=100,
+                    mlp_patience=20,
                     random_state=random_state,
                     device=device.value,
                 )
@@ -491,7 +493,7 @@ def display_interactive_embedding(
                         "transform_method": transform_method.value,
                     }
                 )
-                update_resnet_button()
+                update_mlp_button()
 
                 knn_title = ""
                 if compute_knn.value:
@@ -585,9 +587,9 @@ def display_interactive_embedding(
                     )
                 if not compute_knn.value:
                     status.value += "The optional cross-validation estimate was skipped. "
-                if transform_method.value == "resnet":
+                if transform_method.value == "mlp":
                     status.value += (
-                        "Click Show ResNet predictions to project an equally sized "
+                        "Click Show MLP predictions to project an equally sized "
                         "novel batch. "
                     )
                 status.value += "Adjust the controls and click Fit embedding to update it."
@@ -598,10 +600,10 @@ def display_interactive_embedding(
                 fit_button.disabled = False
 
     dataset.observe(select_dataset, names="value")
-    transform_method.observe(update_resnet_button, names="value")
+    transform_method.observe(update_mlp_button, names="value")
     fit_button.on_click(fit_and_display)
     reset_button.on_click(reset_sliders)
-    resnet_button.on_click(show_resnet_predictions)
+    mlp_button.on_click(show_mlp_predictions)
 
     controls = widgets.VBox(
         [
@@ -613,13 +615,13 @@ def display_interactive_embedding(
             widgets.HBox([logistic_margin, logistic_temperature]),
             widgets.HBox([compute_knn, filter_2d_knn, filter_n_neighbors]),
             widgets.HBox([transform_method]),
-            widgets.HBox([resnet_n_layers, resnet_layer_size, resnet_dropout]),
+            widgets.HBox([mlp_n_layers, mlp_layer_size, mlp_dropout]),
             widgets.HBox([device]),
         ]
     )
     display(
         controls,
-        widgets.HBox([fit_button, reset_button, resnet_button]),
+        widgets.HBox([fit_button, reset_button, mlp_button]),
         output,
         projection_output,
     )
@@ -627,7 +629,7 @@ def display_interactive_embedding(
     return {
         "controls": controls,
         "fit_button": fit_button,
-        "resnet_button": resnet_button,
+        "mlp_button": mlp_button,
         "reset_button": reset_button,
         "output": output,
         "projection_output": projection_output,
@@ -647,9 +649,9 @@ def display_interactive_embedding(
             "filter_2d_knn": filter_2d_knn,
             "filter_n_neighbors": filter_n_neighbors,
             "transform_method": transform_method,
-            "resnet_n_layers": resnet_n_layers,
-            "resnet_layer_size": resnet_layer_size,
-            "resnet_dropout": resnet_dropout,
+            "mlp_n_layers": mlp_n_layers,
+            "mlp_layer_size": mlp_layer_size,
+            "mlp_dropout": mlp_dropout,
             "device": device,
         },
     }

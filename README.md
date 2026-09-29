@@ -83,34 +83,38 @@ visualization.
 ### Transform new samples
 
 By default, `transform` returns the fitted coordinates only for the original
-training matrix. To project unseen rows, set `transform_method="resnet"`. After
-optimizing the embedding, the estimator trains a fully connected residual
-network to predict those coordinates. The network standardizes its inputs and
-targets, uses dropout and AdamW weight decay, and returns predictions in the
-embedding's original coordinate scale.
+training matrix. To project unseen rows, set `transform_method="mlp"`. After
+optimizing the embedding, the estimator trains a standard MLP to predict those
+coordinates. Its defaults are three hidden layers of 256 units with 0.1 dropout.
+It standardizes its inputs and targets and uses a shuffled 10% validation split
+for early stopping. The best validation checkpoint is restored, then
+predictions are returned in the embedding's original coordinate scale.
 
 ```python
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
 mapper = IteratedMinimumSpanningTreeEmbedder(
-    transform_method="resnet",
-    resnet_n_layers=3,       # number of residual blocks
-    resnet_layer_size=256,   # hidden width
-    resnet_dropout=0.1,
+    transform_method="mlp",
+    mlp_n_layers=3,
+    mlp_layer_size=256,
+    mlp_dropout=0.1,
+    mlp_min_epochs=100,
+    mlp_patience=20,
     random_state=42,
 ).fit(X_train)
 
 Z_train = mapper.transform(X_train)  # returns the optimized IMSTE coordinates
-Z_new = mapper.transform(X_new)      # uses the learned residual network
-Z_train_predicted = mapper.transform_with_resnet(X_train)  # apply net to any rows
+Z_new = mapper.transform(X_new)      # uses the learned MLP
+Z_train_predicted = mapper.transform_with_mlp(X_train)  # apply net to any rows
 ```
 
-The residual network is a regularized approximation of the fitted coordinates;
-it does not re-optimize the IMSTE graph for new points. Its training controls
-are `resnet_epochs`, `resnet_batch_size`, `resnet_learning_rate`, and
-`resnet_weight_decay`. `transform_with_resnet` explicitly applies the network
-to any rows, including the training rows; with the default `transform`, exact
-training rows continue to return the optimized IMSTE coordinates.
+The MLP approximates the fitted coordinates; it does not re-optimize the IMSTE
+graph for new points. Its training controls are `mlp_epochs` (maximum epochs,
+default 200), `mlp_min_epochs` (default 100), `mlp_patience` (default 20),
+`mlp_batch_size`, and `mlp_learning_rate`. `transform_with_mlp` explicitly
+applies the network to any rows, including training rows; with the default
+`transform`, exact training rows continue to return the optimized IMSTE
+coordinates.
 
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
@@ -127,8 +131,8 @@ runs and plots 2D IMSTE embeddings across several image datasets.
 
 The estimator exposes `fit`, `fit_transform`, and `transform`. The default
 `transform_method="direct"` returns stored coordinates for the exact training
-matrix only. `transform_method="resnet"` additionally fits a residual network
-so `transform` can project unseen rows.
+matrix only. `transform_method="mlp"` additionally fits an MLP so `transform`
+can project unseen rows.
 
 The main parameters are `n_msts=10`, `distance_type="squared"`,
 `attraction_dampening="log"`, `repulsion_type="logistic"`,
@@ -136,10 +140,10 @@ The main parameters are `n_msts=10`, `distance_type="squared"`,
 `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Projection parameters are `transform_method="direct"`,
-`resnet_n_layers=3`, `resnet_layer_size=256`, `resnet_dropout=0.1`,
-`resnet_epochs=200`, `resnet_batch_size=256`, `resnet_learning_rate=0.001`, and
-`resnet_weight_decay=0.0001`. Edge weights decay by MST rank as
-`1 / rank`, so later trees receive smaller weights. `negative_ratio` samples
+`mlp_n_layers=3`, `mlp_layer_size=256`, `mlp_dropout=0.1`, `mlp_epochs=200`,
+`mlp_min_epochs=100`, `mlp_patience=20`,
+`mlp_batch_size=256`, and `mlp_learning_rate=0.001`. Edge weights decay by MST
+rank as `1 / rank`, so later trees receive smaller weights. `negative_ratio` samples
 that many non-neighbors from each endpoint of each positive edge. On macOS,
 `auto` uses PyTorch's MPS
 backend for datasets with at least 2,048 samples; smaller workloads use the CPU
