@@ -28,18 +28,3 @@ def logistic_repulsion_loss(
         )
     )
 
-
-def bernoulli_repulsion_loss(
-    negative_squared_distances: torch.Tensor,
-    epsilon: float,
-) -> torch.Tensor:
-    """Mean Bernoulli loss over sampled graph non-edges."""
-    return torch.mean(torch.log1p(1.0 / (negative_squared_distances + epsilon)))
-
-
-def inverse_distance_repulsion_loss(
-    negative_squared_distances: torch.Tensor,
-    epsilon: float,
-) -> torch.Tensor:
-    """Mean inverse-distance penalty over sampled graph non-edges."""
-    return torch.mean(1.0 / (1.0 + negative_squared_distances + epsilon))

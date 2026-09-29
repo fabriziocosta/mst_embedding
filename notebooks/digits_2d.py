@@ -166,16 +166,6 @@ def display_interactive_embedding(
         continuous_update=False,
         style={"description_width": "initial"},
     )
-    repulsion_type = widgets.Dropdown(
-        options=[
-            ("Logistic margin", "logistic"),
-            ("Log / Bernoulli", "bernoulli"),
-            ("Inverse distance", "inverse_distance"),
-        ],
-        value="logistic",
-        description="Repulsion dampening",
-        style={"description_width": "initial"},
-    )
     logistic_margin = widgets.FloatSlider(
         value=1.0, min=0.0, max=5.0, step=0.1,
         description="Squared-distance margin",
@@ -396,7 +386,6 @@ def display_interactive_embedding(
         sample_count.value = min(1000, sample_count.max)
         n_msts.value = 10
         lambda_rep.value = 0.5
-        repulsion_type.value = "logistic"
         logistic_margin.value = 1.0
         logistic_temperature.value = 0.5
         negative_ratio.value = 5
@@ -436,7 +425,6 @@ def display_interactive_embedding(
                     learning_rate=0.05,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
-                    repulsion_type=repulsion_type.value,
                     logistic_margin=logistic_margin.value,
                     logistic_temperature=logistic_temperature.value,
                     transform_method=transform_method.value,
@@ -476,12 +464,10 @@ def display_interactive_embedding(
                         cv=cv,
                     ).mean()
                     knn_title = f" · 5-NN 5-fold CV accuracy={knn_accuracy:.3f}"
-                logistic_title = ""
-                if repulsion_type.value == "logistic":
-                    logistic_title = (
-                        f" · logistic m={logistic_margin.value:.1f}, "
-                        f"τ={logistic_temperature.value:.2f}"
-                    )
+                logistic_title = (
+                    f" · logistic m={logistic_margin.value:.1f}, "
+                    f"τ={logistic_temperature.value:.2f}"
+                )
 
                 fig, ax = plt.subplots(figsize=(8, 6))
                 points = ax.scatter(
@@ -502,7 +488,7 @@ def display_interactive_embedding(
                         f"{n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
                         "squared distance · log attraction · "
-                        f"{repulsion_type.value} repulsion · weight_sum · "
+                        "logistic repulsion · weight_sum · "
                         f"1,000 epochs{logistic_title}{knn_title}"
                     ),
                     xlabel="Embedding dimension 1",
@@ -545,7 +531,6 @@ def display_interactive_embedding(
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([batch_size]),
             widgets.HBox([lambda_rep, negative_ratio]),
-            widgets.HBox([repulsion_type]),
             widgets.HBox([logistic_margin, logistic_temperature]),
             widgets.HBox([compute_knn]),
             widgets.HBox([transform_method]),
@@ -574,7 +559,6 @@ def display_interactive_embedding(
             "batch_size": batch_size,
             "n_msts": n_msts,
             "lambda_rep": lambda_rep,
-            "repulsion_type": repulsion_type,
             "logistic_margin": logistic_margin,
             "logistic_temperature": logistic_temperature,
             "negative_ratio": negative_ratio,

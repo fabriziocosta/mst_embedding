@@ -62,13 +62,9 @@ weight `1 / r`, so later trees contribute less.
 Each observation gets a trainable coordinate vector `y_i` in
 `n_components` dimensions. For a pair, let `t = sum_k (y_ik - y_jk) ** 2`.
 The estimator always uses squared Euclidean distance. Positive graph edges use
-logarithmic attraction, `log1p(t + epsilon)`; sampled non-edges apply the
-selected `repulsion_type`. The default `logistic` repulsion combines this with
-a margin-based negative-pair loss. `bernoulli` uses the negative pairwise
-probability loss.
-`inverse_distance` uses
-`1 / (1 + z + epsilon)`, while `logistic` uses a margin-based loss. Negative
-losses are averaged without MST-rank weights. Adam minimizes the convex combination
+logarithmic attraction, `log1p(t + epsilon)`, and sampled non-edges use a
+logistic margin loss. Negative losses are averaged without MST-rank weights.
+Adam minimizes the convex combination
 `(1 - lambda_rep) * attraction + lambda_rep * repulsion`. Here `lambda_rep` is
 the repulsion share in `[0, 1]`;
 the attraction share is `1 - lambda_rep`. The default `0.5` gives equal weight
@@ -118,13 +114,11 @@ coordinates.
 The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
 caches real MNIST and exposes a configurable, stratified sample size (default
 2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)
-uses sliders for sample size and estimator settings, plus a
-dropdown for Bernoulli or inverse-distance repulsion, with `n_components=3`
-and Plotly controls to rotate the learned embedding.
-The [interactive 2D notebook](notebooks/digits_2d_interactive.ipynb) adds
-sliders for sample count and embedding parameters, plus a
-dropdown for Bernoulli or the earlier inverse-distance repulsion; it requires
-the notebook extras, including `ipywidgets`.
+uses sliders for sample size and estimator settings, with `n_components=3`
+and Plotly controls to rotate the learned embedding. The [interactive 2D
+notebook](notebooks/digits_2d_interactive.ipynb) adds controls for sample
+count and embedding parameters; it requires the notebook extras, including
+`ipywidgets`.
 The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
 runs and plots 2D IMSTE embeddings across several image datasets.
 
@@ -133,8 +127,8 @@ The estimator exposes `fit`, `fit_transform`, and `transform`. The default
 matrix only. `transform_method="mlp"` additionally fits an MLP so `transform`
 can project unseen rows.
 
-The main parameters are `n_msts=10`, `repulsion_type="logistic"`,
-`logistic_margin=1.0`, `logistic_temperature=0.5`, `n_components=2`, `n_epochs=1000`,
+The main parameters are `n_msts=10`, `logistic_margin=1.0`,
+`logistic_temperature=0.5`, `n_components=2`, `n_epochs=1000`,
 `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
 `device="auto"`. Projection parameters are `transform_method="direct"`,
@@ -151,24 +145,6 @@ selected backend is available as `estimator.device_` after fitting.
 
 Attraction is normalized by the sum of graph edge weights. This keeps its
 scale more consistent as additional low-weight MST ranks are added.
-Repulsion can be `"bernoulli"`, `"inverse_distance"`, or `"logistic"`.
-Logistic margin and temperature control the logistic repulsion loss.
-
-The built-in logarithmic attraction is fixed. The repulsion loss can optionally
-be replaced with `repulsion_loss_fn`, which must return a scalar PyTorch tensor
-differentiable with respect to its squared-distance input. For example:
-
-```python
-from mst_embedding import IteratedMinimumSpanningTreeEmbedder
-
-def custom_repulsion(negative_squared_distances, epsilon):
-    return torch.mean(1.0 / (negative_squared_distances + epsilon))
-
-embedding = IteratedMinimumSpanningTreeEmbedder(
-    repulsion_loss_fn=custom_repulsion,
-).fit_transform(X)
-```
-
-The built-in `log_attraction_loss`, `bernoulli_repulsion_loss`,
-`inverse_distance_repulsion_loss`, and `logistic_repulsion_loss` functions are
-exported from `mst_embedding` for reuse or comparison.
+Logistic margin and temperature control the negative-pair loss. The built-in
+`log_attraction_loss` and `logistic_repulsion_loss` functions are exported from
+`mst_embedding` for reuse.

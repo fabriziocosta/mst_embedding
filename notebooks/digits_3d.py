@@ -36,7 +36,6 @@ def fit_and_plot_mst_3d(
     random_state=42,
     device="auto",
     trustworthiness_neighbors=10,
-    repulsion_type="logistic",
 ):
     """Fit one 3D IMSTE embedding and return its scores and Plotly figure."""
     X = np.asarray(X)
@@ -48,7 +47,6 @@ def fit_and_plot_mst_3d(
 
     estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=n_msts,
-        repulsion_type=repulsion_type,
         n_components=3,
         n_epochs=n_epochs,
         batch_size=batch_size,
@@ -223,16 +221,6 @@ def display_interactive_mst_3d(
         continuous_update=False,
         style={"description_width": "initial"},
     )
-    repulsion_type = widgets.Dropdown(
-        options=[
-            ("Logistic margin", "logistic"),
-            ("Bernoulli (log)", "bernoulli"),
-            ("Inverse distance (previous)", "inverse_distance"),
-        ],
-        value="logistic",
-        description="Repulsion force",
-        style={"description_width": "initial"},
-    )
     epsilon = widgets.FloatLogSlider(
         value=1e-4, base=10, min=-8, max=-2, step=0.1,
         description="Epsilon", continuous_update=False,
@@ -282,7 +270,6 @@ def display_interactive_mst_3d(
         learning_rate.value = 0.05
         negative_ratio.value = 5
         lambda_rep.value = 0.5
-        repulsion_type.value = "logistic"
         epsilon.value = 1e-4
         random_state_slider.value = 42
         trustworthiness_neighbors.value = 10
@@ -306,7 +293,6 @@ def display_interactive_mst_3d(
                     learning_rate=learning_rate.value,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
-                    repulsion_type=repulsion_type.value,
                     epsilon=epsilon.value,
                     random_state=random_state_slider.value,
                     device=device.value,
@@ -328,7 +314,6 @@ def display_interactive_mst_3d(
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([n_epochs, batch_size, learning_rate]),
             widgets.HBox([negative_ratio, lambda_rep, epsilon]),
-            widgets.HBox([repulsion_type]),
             widgets.HBox([random_state_slider, trustworthiness_neighbors, device]),
         ]
     )
@@ -347,7 +332,6 @@ def display_interactive_mst_3d(
             "learning_rate": learning_rate,
             "negative_ratio": negative_ratio,
             "lambda_rep": lambda_rep,
-            "repulsion_type": repulsion_type,
             "epsilon": epsilon,
             "random_state": random_state_slider,
             "trustworthiness_neighbors": trustworthiness_neighbors,

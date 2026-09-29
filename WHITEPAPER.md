@@ -107,7 +107,7 @@ $$
 q_{ij}=\frac{1}{1+z_{ij}+\epsilon}.
 $$
 
-With the default `attraction_normalization="weight_sum"`, the attractive term is
+The attractive term is
 
 $$
 L_{\mathrm{attr}}=
@@ -117,9 +117,8 @@ w_{ij}\bigl[-\log(q_{ij})\bigr]
 w_{ij}\log(1+z_{ij}+\epsilon).
 $$
 
-This is the Bernoulli negative log-likelihood for a positive edge. Minimizing
-it brings graph-connected samples together. The MST-rank weight applies to
-positive edges only.
+Minimizing it brings graph-connected samples together. The MST-rank weight
+applies to positive edges only.
 
 Weight-sum normalization keeps the attraction scale from falling simply
 because more, lower-weight MST ranks were added. With minibatch optimization,
@@ -142,39 +141,18 @@ $$
 d_{uv}^2=\sum_{k=1}^{q}(y_{uk}-y_{vk})^2.
 $$
 
-For each sampled negative pair, the default Bernoulli negative log-likelihood
-is:
-
-$$
-L_{uv}^{-}=-\log(1-q_{uv})
-=\log\!\left(1+\frac{1}{z_{uv}+\epsilon}\right).
-$$
+For each sampled negative pair, the logistic margin loss is:
 
 Here $z_{uv}=d_{uv}^2$ is the squared Euclidean embedding distance.
-
-Alternatively, `repulsion_type="inverse_distance"` selects the original
-penalty:
-
-$$
-L_{uv}^{-}=\frac{1}{1+z_{uv}+\epsilon}.
-$$
-
-This inverse-distance penalty gives a shallower response to close negatives
-than the Bernoulli log loss. `repulsion_type="logistic"` uses
 
 $$
 L_{uv}^{-}=\operatorname{softplus}\left(\frac{m-z_{uv}}{\tau}\right),
 $$
 
 with `logistic_margin` $m$ and `logistic_temperature` $\tau$. The default is
-`repulsion_type="logistic"`. All three
-repulsion types use the unweighted mean of losses over the
-sampled set of negative pairs. The MST-rank weights are not applied to
-negative samples.
-For the Bernoulli choice, positive epsilon keeps both q and 1-q strictly
-positive. Under either choice, nearby negative pairs incur a larger cost and
-are pushed apart. If a graph has no eligible negative pairs, the repulsive
-term is set to zero for that step.
+The negative loss is averaged over sampled pairs without MST-rank weights.
+Nearby negative pairs incur a larger cost and are pushed apart. If a graph
+has no eligible negative pairs, the repulsive term is zero for that step.
 
 The combined minibatch objective is
 
@@ -188,11 +166,8 @@ weight to the two terms. The implementation normalizes the weighted
 positive-edge losses by their graph-wide total weight; the negative term is
 unchanged.
 
-The logarithmic attraction is fixed. The estimator accepts an optional
-`repulsion_loss_fn` callable that receives negative squared distances and
-epsilon and must return a scalar differentiable PyTorch tensor. If omitted,
-`repulsion_type` selects the built-in negative-pair loss. The estimator
-optimizes sample coordinates; a custom loss function is not itself trained.
+The estimator uses the logarithmic attraction and logistic repulsion described
+above. The estimator optimizes sample coordinates directly.
 
 ## 5. Optimization procedure
 
@@ -209,7 +184,6 @@ weight for each edge.
 | Parameter | Default | Role |
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
-| `attraction_normalization` | `weight_sum` (fixed) | Attraction denominator: total edge weight |
 | `logistic_margin` | 1.0 | Squared-distance margin for logistic repulsion |
 | `logistic_temperature` | 0.5 | Softness of the logistic repulsion; must be positive |
 | `n_components` | 2 | Number of output dimensions |
@@ -218,7 +192,6 @@ weight for each edge.
 | `learning_rate` | 0.05 | Adam learning rate |
 | `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
-| `repulsion_type` | `logistic` | Negative-pair shaping: Bernoulli log, inverse distance, or logistic |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
 | `device` | `auto` | CPU or Apple MPS optimization backend |

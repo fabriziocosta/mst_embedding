@@ -106,40 +106,6 @@ def test_dataframe_transform_rejects_reordered_feature_names():
         estimator.transform(X[["right", "left"]])
 
 
-def test_custom_loss_must_depend_on_supplied_distances():
-    def disconnected_repulsion(negative_squared_distances, epsilon):
-        del epsilon
-        return torch.ones(
-            (), device=negative_squared_distances.device, requires_grad=True
-        )
-
-    with pytest.raises(ValueError, match="must depend on the supplied distances"):
-        IteratedMinimumSpanningTreeEmbedder(
-            n_msts=1,
-            n_epochs=1,
-            batch_size=100,
-            negative_ratio=1,
-            repulsion_loss_fn=disconnected_repulsion,
-            random_state=5,
-        ).fit(small_data())
-
-
-def test_custom_loss_rejects_non_finite_values():
-    def non_finite_repulsion(negative_squared_distances, epsilon):
-        del epsilon
-        return torch.mean(negative_squared_distances * torch.tensor(float("nan")))
-
-    with pytest.raises(ValueError, match="returned a non-finite loss"):
-        IteratedMinimumSpanningTreeEmbedder(
-            n_msts=1,
-            n_epochs=1,
-            batch_size=100,
-            negative_ratio=1,
-            repulsion_loss_fn=non_finite_repulsion,
-            random_state=5,
-        ).fit(small_data())
-
-
 def test_dense_negative_sampling_falls_back_to_exact_complement():
     n_samples = 64
     packed_adjacency = np.full((n_samples, n_samples // 8), 0xFF, dtype=np.uint8)
@@ -223,7 +189,6 @@ def test_mps_device_runs_when_available():
         ("learning_rate", 0),
         ("lambda_rep", -1),
         ("epsilon", 0),
-        ("attraction_normalization", "invalid"),
     ],
 )
 def test_invalid_parameters_raise_value_error(parameter, value):
@@ -251,7 +216,7 @@ def test_exact_graph_uses_euclidean_distances():
     assert set(estimator.graph_weights_) == {1.0, 0.5}
 
 
-def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale(monkeypatch):
+def test_attraction_uses_global_weight_sum_scale(monkeypatch):
     X = small_data()
     observed_weights = []
     original_log_attraction_loss = log_attraction_loss
@@ -272,7 +237,6 @@ def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale(monkey
         batch_size=100,
         negative_ratio=0,
         random_state=3,
-        attraction_normalization="weight_sum",
     ).fit(X)
 
     expected = estimator.graph_weights_ * (
