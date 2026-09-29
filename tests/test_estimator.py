@@ -5,6 +5,7 @@ from sklearn.base import clone
 from scipy.spatial.distance import cdist
 
 from imste import IteratedMinimumSpanningTreeEmbedder
+from imste.inductive import InductiveIMSTE
 from imste._estimator import (
     _iterated_mst_edges,
     _sample_negative_targets,
@@ -71,28 +72,31 @@ def test_transform_rejects_new_or_reordered_rows():
         estimator.transform(np.vstack([X, [3.0, 3.0]]))
 
 
-def test_mlp_projection_fits_and_transforms_unseen_rows():
+def test_inductive_projection_maps_training_and_unseen_rows():
     X = small_data()
-    estimator = IteratedMinimumSpanningTreeEmbedder(
-        n_msts=1,
-        n_epochs=0,
-        transform_method="mlp",
-        mlp_n_layers=1,
-        mlp_layer_size=8,
-        mlp_dropout=0.0,
-        mlp_epochs=4,
-        mlp_min_epochs=2,
-        mlp_patience=2,
-        mlp_batch_size=2,
-        random_state=11,
+    estimator = InductiveIMSTE(
+        embedder=IteratedMinimumSpanningTreeEmbedder(
+            n_msts=1, n_epochs=0, random_state=11
+        ),
+        n_layers=1,
+        layer_size=8,
+        dropout=0.0,
+        epochs=4,
+        min_epochs=2,
+        patience=2,
+        batch_size=2,
     ).fit(X)
 
-    prediction = estimator.transform([[3.0, 3.0]])
-    assert prediction.shape == (1, 2)
-    assert np.isfinite(prediction).all()
-    assert 2 <= estimator.mlp_epochs_trained_ <= 4
-    assert np.isfinite(estimator.mlp_best_validation_loss_)
-    assert np.isfinite(estimator.mlp_training_loss_)
+    training_projection = estimator.transform(X)
+    novel_projection = estimator.transform([[3.0, 3.0]])
+    assert training_projection.shape == (len(X), 2)
+    assert novel_projection.shape == (1, 2)
+    assert np.isfinite(training_projection).all()
+    assert np.isfinite(novel_projection).all()
+    assert estimator.reference_embedding_.shape == (len(X), 2)
+    assert 2 <= estimator.epochs_trained_ <= 4
+    assert np.isfinite(estimator.best_validation_loss_)
+    assert np.isfinite(estimator.training_loss_)
 
 
 def test_dataframe_transform_rejects_reordered_feature_names():
@@ -121,30 +125,29 @@ def test_dense_negative_sampling_falls_back_to_exact_complement():
     np.testing.assert_array_equal(sampled, np.full(32, 63))
 
 
-def test_mlp_stops_after_patience_once_minimum_epochs_are_met(monkeypatch):
+def test_inductive_mlp_stops_after_patience_once_minimum_epochs_are_met(monkeypatch):
     class ConstantMLP(torch.nn.Module):
-        def __init__(self, n_features, n_components, n_layers, width, dropout):
+        def __init__(self, n_features, n_components, n_layers, layer_size, dropout):
             super().__init__()
             self.output = torch.nn.Parameter(torch.ones(n_components))
 
         def forward(self, inputs):
             return (self.output * 0).expand(inputs.shape[0], -1)
 
-    monkeypatch.setattr("imste._estimator._MLPProjector", ConstantMLP)
-    estimator = IteratedMinimumSpanningTreeEmbedder(
-        n_msts=1,
-        n_epochs=0,
-        transform_method="mlp",
-        mlp_n_layers=1,
-        mlp_layer_size=4,
-        mlp_dropout=0.0,
-        mlp_epochs=8,
-        mlp_min_epochs=2,
-        mlp_patience=2,
-        random_state=19,
+    monkeypatch.setattr("imste.inductive._MLPProjector", ConstantMLP)
+    estimator = InductiveIMSTE(
+        embedder=IteratedMinimumSpanningTreeEmbedder(
+            n_msts=1, n_epochs=0, random_state=19
+        ),
+        n_layers=1,
+        layer_size=4,
+        dropout=0.0,
+        epochs=8,
+        min_epochs=2,
+        patience=2,
     ).fit(small_data())
 
-    assert estimator.mlp_epochs_trained_ == 3
+    assert estimator.epochs_trained_ == 3
 
 
 def test_duplicate_samples_keep_zero_distance_mst_edges():

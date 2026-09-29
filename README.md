@@ -1,150 +1,181 @@
-# IMSTE: Iterated Minimum Spanning Tree Embedding
+# IMSTE
 
-`imste` provides IMSTE, a scikit-learn-compatible transformer that
-learns an embedding from a union of edge-disjoint minimum spanning trees. It
-defaults to two dimensions and supports other output dimensions through `n_components`.
-The method has two stages: it builds a weighted graph from repeated MSTs, then
-optimizes one coordinate vector per input sample. For a detailed explanation,
-see the [whitepaper](WHITEPAPER.md).
+**Iterated Minimum Spanning Tree Embedding (IMSTE)** is a scikit-learn
+transformer for learning low-dimensional coordinates from numeric data. It
+builds a weighted graph from edge-disjoint minimum spanning trees, then
+optimizes one coordinate vector per sample.
+
+The package has two explicit estimators: `IteratedMinimumSpanningTreeEmbedder`
+learns coordinates for the training rows, while `InductiveIMSTE` also learns
+an MLP that maps new rows into that space.
 
 ## Install
+
+From a source checkout:
 
 ```bash
 python -m pip install .
 ```
 
-To run the notebooks, install their plotting dependencies:
+For notebooks, install the optional plotting and widget dependencies:
 
 ```bash
 python -m pip install ".[notebook]"
 ```
 
-## Example
+## Quick start
+
+IMSTE uses Euclidean distances to build its graph. Scale features first when
+they have different ranges. This small example uses scikit-learn's built-in
+digits dataset, so it does not need a download:
 
 ```python
 import numpy as np
-from sklearn.datasets import fetch_openml
-from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_digits
 from sklearn.preprocessing import StandardScaler
 
 from imste import IteratedMinimumSpanningTreeEmbedder
 
-mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
-indices, _ = train_test_split(
-    np.arange(len(mnist.data)), train_size=2000,
-    random_state=42, stratify=mnist.target,
-)
-X = StandardScaler().fit_transform(
-    np.asarray(mnist.data, dtype=np.float32)[indices]
-)
+digits = load_digits()
+rng = np.random.default_rng(42)
+rows = rng.choice(len(digits.data), size=500, replace=False)
+X = StandardScaler().fit_transform(digits.data[rows])
 
-embedding = IteratedMinimumSpanningTreeEmbedder(random_state=42).fit_transform(X)
-assert embedding.shape == (len(X), 2)
+mapper = IteratedMinimumSpanningTreeEmbedder(
+    n_msts=5,
+    n_epochs=300,
+    random_state=42,
+)
+embedding = mapper.fit_transform(X)
 
-# Request 3D coordinates for interactive visualization.
-embedding_3d = IteratedMinimumSpanningTreeEmbedder(
-    n_components=3, random_state=42
-).fit_transform(X)
-assert embedding_3d.shape == (len(X), 3)
+print(embedding.shape)  # (500, 2)
 ```
 
-## Algorithm
+The labels are not passed to the estimator. Use them afterward to color or
+score a visualization if needed.
 
-### Build the graph
+## How it works
 
-The method computes all pairwise Euclidean distances and repeatedly builds an
-MST, removing each selected edge before constructing the next tree. The union
-contains `n_msts` edge-disjoint trees. An edge first selected at rank `r` gets
-weight `1 / r`, so later trees contribute less.
+### Build a graph
+
+The estimator computes pairwise Euclidean distances, constructs `n_msts`
+edge-disjoint minimum spanning trees, and joins their edges into one graph.
+An edge selected in tree rank `r` receives weight `1 / r`, so edges from later
+trees contribute less to attraction.
 
 ### Optimize coordinates
 
-Each observation gets a trainable coordinate vector `y_i` in
-`n_components` dimensions. For a pair, let `t = sum_k (y_ik - y_jk) ** 2`.
-The estimator always uses squared Euclidean distance. Positive graph edges use
-logarithmic attraction, `log1p(t + epsilon)`, and sampled non-edges use a
-logistic margin loss. Negative losses are averaged without MST-rank weights.
-Adam minimizes the convex combination
-`(1 - lambda_rep) * attraction + lambda_rep * repulsion`. Here `lambda_rep` is
-the repulsion share in `[0, 1]`;
-the attraction share is `1 - lambda_rep`. The default `0.5` gives equal weight
-to the two mean losses.
+The embedding objective uses squared Euclidean distances. For an embedded pair
+`i, j`, let `d² = sum((y_i - y_j) ** 2)`. Graph edges use logarithmic
+attraction, `log1p(d² + epsilon)`. Sampled non-edges use logistic repulsion,
+`softplus((logistic_margin - d²) / logistic_temperature)`.
 
-Training shuffles the graph edges each epoch and processes them in batches.
-The random seed controls initialization, edge ordering, and negative sampling.
-Labels are not used during fitting; they can be used afterward to color a
-visualization.
+`lambda_rep` sets the repulsion share of the objective; attraction receives
+`1 - lambda_rep`. Positive edge losses are normalized by the total graph-edge
+weight. Negative losses use an unweighted mean. Each positive edge contributes
+`negative_ratio` sampled non-neighbors from each endpoint.
 
-### Transform new samples
+The graph is exact and dense pairwise distances are computed, so graph
+construction uses quadratic time and memory in the number of samples. For
+larger datasets, start with a subset and increase its size as needed.
 
-By default, `transform` returns the fitted coordinates only for the original
-training matrix. To project unseen rows, set `transform_method="mlp"`. After
-optimizing the embedding, the estimator trains a standard MLP to predict those
-coordinates. Its defaults are six hidden layers of 128 units with 0.1 dropout.
-It standardizes its inputs and targets and uses a shuffled 10% validation split
-for early stopping. The best validation checkpoint is restored, then
-predictions are returned in the embedding's original coordinate scale.
+## Choose how to transform rows
+
+### Transductive: training rows only
+
+Use the core estimator when you want optimized coordinates for the fitted
+rows. Its `transform` accepts only the exact training matrix in its original
+row order; it raises an error for new or reordered rows.
 
 ```python
 from imste import IteratedMinimumSpanningTreeEmbedder
 
-mapper = IteratedMinimumSpanningTreeEmbedder(
-    transform_method="mlp",
-    mlp_n_layers=6,
-    mlp_layer_size=128,
-    mlp_dropout=0.1,
-    mlp_min_epochs=100,
-    mlp_patience=20,
-    random_state=42,
-).fit(X_train)
-
-Z_train = mapper.transform(X_train)  # returns the optimized IMSTE coordinates
-Z_new = mapper.transform(X_new)      # uses the learned MLP
-Z_train_predicted = mapper.transform_with_mlp(X_train)  # apply net to any rows
+mapper = IteratedMinimumSpanningTreeEmbedder(n_msts=10).fit(X_train)
+Z_train = mapper.transform(X_train)
 ```
 
-The MLP approximates the fitted coordinates; it does not re-optimize the IMSTE
-graph for new points. Its training controls are `mlp_epochs` (maximum epochs,
-default 200), `mlp_min_epochs` (default 100), `mlp_patience` (default 20),
-`mlp_batch_size`, and `mlp_learning_rate`. `transform_with_mlp` explicitly
-applies the network to any rows, including training rows; with the default
-`transform`, exact training rows continue to return the optimized IMSTE
-coordinates.
+### Inductive: map new rows with an MLP
 
-The [parameter-sweep notebook](notebooks/digits_parameter_sweep.ipynb) loads and
-caches real MNIST and exposes a configurable, stratified sample size (default
-2,000). The [interactive 3D notebook](notebooks/digits_3d_interactive.ipynb)
-uses sliders for sample size and estimator settings, with `n_components=3`
-and Plotly controls to rotate the learned embedding. The [interactive 2D
-notebook](notebooks/digits_2d_interactive.ipynb) adds controls for sample
-count and embedding parameters; it requires the notebook extras, including
-`ipywidgets`.
-The [high-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb)
-runs and plots 2D IMSTE embeddings across several image datasets.
+Import `InductiveIMSTE` from the explicit `imste.inductive` module. It fits a
+transductive IMSTE embedding, then trains an MLP to predict those coordinates:
 
-The estimator exposes `fit`, `fit_transform`, and `transform`. The default
-`transform_method="direct"` returns stored coordinates for the exact training
-matrix only. `transform_method="mlp"` additionally fits an MLP so `transform`
-can project unseen rows.
+```python
+from imste import IteratedMinimumSpanningTreeEmbedder
+from imste.inductive import InductiveIMSTE
 
-The main parameters are `n_msts=10`, `logistic_margin=1.0`,
-`logistic_temperature=0.5`, `n_components=2`, `n_epochs=1000`,
-`batch_size=4096`, `learning_rate=0.05`,
-`negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
-`device="auto"`. Projection parameters are `transform_method="direct"`,
-`mlp_n_layers=6`, `mlp_layer_size=128`, `mlp_dropout=0.1`, `mlp_epochs=200`,
-`mlp_min_epochs=100`, `mlp_patience=20`,
-`mlp_batch_size=256`, and `mlp_learning_rate=0.001`. Edge weights decay by MST
-rank as `1 / rank`, so later trees receive smaller weights. `negative_ratio` samples
-that many non-neighbors from each endpoint of each positive edge. On macOS,
-`auto` uses PyTorch's MPS
-backend for datasets with at least 2,048 samples; smaller workloads use the CPU
-because GPU launch overhead was higher for a smaller handwritten-digits dataset.
-Set `device="mps"` to force Metal acceleration or `device="cpu"` to force CPU execution. The
-selected backend is available as `estimator.device_` after fitting.
+mapper = InductiveIMSTE(
+    embedder=IteratedMinimumSpanningTreeEmbedder(
+        n_msts=10,
+        random_state=42,
+    ),
+    n_layers=6,
+    layer_size=128,
+    dropout=0.1,
+    min_epochs=100,
+    patience=20,
+).fit(X_train)
 
-Attraction is normalized by the sum of graph edge weights. This keeps its
-scale more consistent as additional low-weight MST ranks are added.
-Logistic margin and temperature control the negative-pair loss. The built-in
-`log_attraction_loss` and `logistic_repulsion_loss` functions are exported from
-`imste` for reuse.
+Z_train = mapper.transform(X_train)  # MLP predictions for training rows
+Z_new = mapper.transform(X_new)      # MLP predictions for new rows
+Z_reference = mapper.reference_embedding_  # exact optimized IMSTE coordinates
+```
+
+`InductiveIMSTE.transform` always uses the MLP, including for training rows.
+Its `reference_embedding_` contains the exact transductive coordinates that
+serve as MLP targets. The MLP standardizes its inputs and targets, holds out
+10% of the input rows for validation, and restores the checkpoint with the
+best validation loss. The IMSTE coordinates use all input rows; the validation
+split only controls MLP early stopping. Predictions approximate the reference
+embedding and do not extend or re-optimize its graph.
+
+## Parameters
+
+| Parameter | Default | Meaning |
+| --- | ---: | --- |
+| `n_msts` | `10` | Number of edge-disjoint spanning trees |
+| `n_components` | `2` | Embedding dimensions |
+| `n_epochs` | `1000` | Coordinate-optimization epochs |
+| `batch_size` | `4096` | Positive graph edges per optimization step |
+| `learning_rate` | `0.05` | Coordinate optimizer learning rate |
+| `negative_ratio` | `5` | Non-neighbors sampled per endpoint of each positive edge |
+| `lambda_rep` | `0.5` | Repulsion share, from 0 to 1 |
+| `logistic_margin` | `1.0` | Squared-distance margin for repulsion |
+| `logistic_temperature` | `0.5` | Logistic repulsion softness; must be positive |
+| `epsilon` | `1e-4` | Smoothing for the logarithmic attraction |
+| `random_state` | `42` | Seed for initialization, shuffling, and sampling |
+| `device` | `"auto"` | `"cpu"`, `"mps"`, or automatic selection |
+
+For `device="auto"`, macOS uses PyTorch MPS for datasets with at least 2,048
+rows; smaller datasets use the CPU. Other systems use the CPU. The selected
+device is available as `mapper.device_` after fitting.
+
+### MLP parameters
+
+| Parameter | Default | Meaning |
+| --- | ---: | --- |
+| `n_layers` | `6` | Hidden layers in `InductiveIMSTE` |
+| `layer_size` | `128` | Units in each hidden layer |
+| `dropout` | `0.1` | Dropout probability |
+| `epochs` | `200` | Maximum MLP training epochs |
+| `min_epochs` | `100` | Minimum epochs before early stopping |
+| `patience` | `20` | Epochs without validation improvement before stopping |
+| `batch_size` | `256` | Rows per MLP update and prediction batch |
+| `learning_rate` | `0.001` | MLP optimizer learning rate |
+
+These are `InductiveIMSTE` parameters. Configure the graph and coordinate
+optimization by passing an `IteratedMinimumSpanningTreeEmbedder` as `embedder`.
+
+## Notebooks
+
+- [Interactive 2D embedding](notebooks/digits_2d_interactive.ipynb): choose a
+  dataset, fit settings, and optionally compare MLP predictions with the
+  optimized coordinates.
+- [Interactive 3D embedding](notebooks/digits_3d_interactive.ipynb): explore
+  three-dimensional embeddings with Plotly.
+- [Parameter sweep](notebooks/digits_parameter_sweep.ipynb): compare IMSTE
+  settings and reference embeddings on MNIST.
+- [High-dimensional dataset gallery](notebooks/high_dim_mst_gallery.ipynb):
+  view embeddings across image datasets.
+
+For the full method description and equations, see the
+[IMSTE whitepaper](WHITEPAPER.md).

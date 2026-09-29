@@ -22,6 +22,7 @@ except ModuleNotFoundError:  # Also support importing as notebooks.digits_2d.
     from .digits_sweep import load_mnist_data
     from .high_dim_mst_gallery import _load_kmnist, _load_openml, _stratified_sample
 from imste import IteratedMinimumSpanningTreeEmbedder
+from imste.inductive import InductiveIMSTE
 
 
 DATASET_LABELS = {
@@ -81,10 +82,11 @@ def display_interactive_embedding(
 
     Dataset choices load lazily and cache balanced sample pools with separate,
     disjoint training and novel rows. Controls configure sample count, MST
-    count, embedding batch size, distance and loss shapes, and negative
-    sampling. Attraction uses fixed weight-sum normalization. Fits use 1,000
-    epochs and a 0.05 learning rate. The embedding is fit only when the user
-    clicks the fit button.
+    count, embedding batch size, logistic-loss settings, and negative sampling.
+    The estimator menu selects transductive IMSTE or its inductive MLP
+    extension. Attraction uses fixed weight-sum normalization. Fits use 1,000
+    epochs and a 0.05 learning rate. Fitting starts when the user clicks the
+    fit button.
     Returns widget references for notebook customization.
     """
     if max_instances < 500:
@@ -192,10 +194,13 @@ def display_interactive_embedding(
         description="Estimate 5-fold 5-NN accuracy",
         indent=False,
     )
-    transform_method = widgets.Dropdown(
-        options=[("Direct (training rows only)", "direct"), ("MLP projection", "mlp")],
-        value="direct",
-        description="Transform",
+    embedding_type = widgets.Dropdown(
+        options=[
+            ("Transductive (training rows only)", "transductive"),
+            ("Inductive (MLP projection)", "inductive"),
+        ],
+        value="transductive",
+        description="Estimator",
         style={"description_width": "initial"},
     )
     mlp_n_layers = widgets.IntSlider(
@@ -225,6 +230,10 @@ def display_interactive_embedding(
         continuous_update=False,
         style={"description_width": "initial"},
     )
+    projection_controls = widgets.HBox(
+        [mlp_n_layers, mlp_layer_size, mlp_dropout]
+    )
+    projection_controls.layout.display = "none"
     mps_backend = getattr(torch.backends, "mps", None)
     mps_available = bool(
         sys.platform == "darwin"
@@ -250,7 +259,7 @@ def display_interactive_embedding(
         icon="undo",
     )
     mlp_button = widgets.Button(
-        description="Show MLP predictions",
+        description="Compare reference and novel predictions",
         tooltip=(
             "Compare the training embedding with predictions for a disjoint, "
             "same-size batch from the same dataset."
@@ -272,8 +281,8 @@ def display_interactive_embedding(
             labels = fitted["labels"]
             novel_X = fitted["novel_X"]
             novel_labels = fitted["novel_labels"]
-            embedding = fitted["embedding"]
-            predicted = estimator.transform_with_mlp(novel_X)
+            embedding = fitted["reference_embedding"]
+            predicted = estimator.transform(novel_X)
 
             fig, axes = plt.subplots(
                 1, 2, figsize=(13, 5.5), sharex=True, sharey=True,
@@ -340,11 +349,13 @@ def display_interactive_embedding(
             display(fig)
             plt.close(fig)
 
-    def update_mlp_button(*_) -> None:
+    def update_estimator_controls(*_) -> None:
+        is_inductive = embedding_type.value == "inductive"
+        projection_controls.layout.display = "" if is_inductive else "none"
         mlp_button.disabled = not (
             current_fit
-            and current_fit.get("transform_method") == "mlp"
-            and transform_method.value == "mlp"
+            and current_fit.get("embedding_type") == "inductive"
+            and is_inductive
         )
 
     def select_dataset(change) -> None:
@@ -391,7 +402,7 @@ def display_interactive_embedding(
         negative_ratio.value = 5
         compute_knn.value = False
         batch_size.value = 8192
-        transform_method.value = "direct"
+        embedding_type.value = "transductive"
         mlp_n_layers.value = 6
         mlp_layer_size.value = 128
         mlp_dropout.value = 0.1
@@ -417,7 +428,7 @@ def display_interactive_embedding(
                         "The selected dataset pool does not contain enough novel "
                         "rows for a same-size prediction batch."
                     )
-                estimator = IteratedMinimumSpanningTreeEmbedder(
+                core_estimator = IteratedMinimumSpanningTreeEmbedder(
                     n_msts=n_msts.value,
                     n_components=2,
                     n_epochs=1000,
@@ -427,17 +438,27 @@ def display_interactive_embedding(
                     lambda_rep=lambda_rep.value,
                     logistic_margin=logistic_margin.value,
                     logistic_temperature=logistic_temperature.value,
-                    transform_method=transform_method.value,
-                    mlp_n_layers=mlp_n_layers.value,
-                    mlp_layer_size=mlp_layer_size.value,
-                    mlp_dropout=mlp_dropout.value,
-                    mlp_min_epochs=100,
-                    mlp_patience=20,
                     random_state=random_state,
                     device=device.value,
                 )
+                if embedding_type.value == "inductive":
+                    estimator = InductiveIMSTE(
+                        embedder=core_estimator,
+                        n_layers=mlp_n_layers.value,
+                        layer_size=mlp_layer_size.value,
+                        dropout=mlp_dropout.value,
+                        min_epochs=100,
+                        patience=20,
+                    )
+                else:
+                    estimator = core_estimator
                 started = time.perf_counter()
                 embedding = estimator.fit_transform(X)
+                reference_embedding = (
+                    estimator.reference_embedding_
+                    if embedding_type.value == "inductive"
+                    else embedding
+                )
                 elapsed = time.perf_counter() - started
                 current_fit.update(
                     {
@@ -446,11 +467,12 @@ def display_interactive_embedding(
                         "novel_X": novel_X,
                         "novel_labels": novel_labels.copy(),
                         "embedding": embedding.copy(),
+                        "reference_embedding": reference_embedding.copy(),
                         "dataset": active_dataset["name"],
-                        "transform_method": transform_method.value,
+                        "embedding_type": embedding_type.value,
                     }
                 )
-                update_mlp_button()
+                update_estimator_controls()
 
                 knn_title = ""
                 if compute_knn.value:
@@ -507,10 +529,11 @@ def display_interactive_embedding(
                 status.value = "Embedding ready. "
                 if not compute_knn.value:
                     status.value += "The optional cross-validation estimate was skipped. "
-                if transform_method.value == "mlp":
+                if embedding_type.value == "inductive":
                     status.value += (
-                        "Click Show MLP predictions to project an equally sized "
-                        "novel batch. "
+                        "The displayed training coordinates are MLP predictions. "
+                        "Use the comparison button to view the exact reference "
+                        "embedding and predictions for novel rows. "
                     )
                 status.value += "Adjust the controls and click Fit embedding to update it."
             except Exception:
@@ -520,7 +543,7 @@ def display_interactive_embedding(
                 fit_button.disabled = False
 
     dataset.observe(select_dataset, names="value")
-    transform_method.observe(update_mlp_button, names="value")
+    embedding_type.observe(update_estimator_controls, names="value")
     fit_button.on_click(fit_and_display)
     reset_button.on_click(reset_sliders)
     mlp_button.on_click(show_mlp_predictions)
@@ -533,8 +556,8 @@ def display_interactive_embedding(
             widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([logistic_margin, logistic_temperature]),
             widgets.HBox([compute_knn]),
-            widgets.HBox([transform_method]),
-            widgets.HBox([mlp_n_layers, mlp_layer_size, mlp_dropout]),
+            widgets.HBox([embedding_type]),
+            projection_controls,
             widgets.HBox([device]),
         ]
     )
@@ -563,7 +586,7 @@ def display_interactive_embedding(
             "logistic_temperature": logistic_temperature,
             "negative_ratio": negative_ratio,
             "compute_knn": compute_knn,
-            "transform_method": transform_method,
+            "embedding_type": embedding_type,
             "mlp_n_layers": mlp_n_layers,
             "mlp_layer_size": mlp_layer_size,
             "mlp_dropout": mlp_dropout,

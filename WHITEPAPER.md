@@ -278,16 +278,15 @@ negative sampling. It makes CPU runs repeatable under the same software and
 hardware configuration. Different compute backends or software versions may
 produce small numerical differences.
 
-The estimator follows the scikit-learn `fit`, `fit_transform`, and `transform`
-interface. Since all coordinates are optimized jointly, `transform` only
-returns stored coordinates when given the exact training matrix in its
-original row order. In the direct mode it raises an error for new or reordered
-rows. The estimator also offers an optional post-hoc MLP projection to
-approximate the optimized coordinates. The default has six hidden layers of
-128 units and 0.1 dropout. It uses a 10% validation split with at least 100
-epochs of training and a patience of 20. This learned regressor is an extension
-around the core IMSTE objective, not part of the embedding algorithm described
-here.
+The transductive `IteratedMinimumSpanningTreeEmbedder` follows the scikit-learn
+`fit`, `fit_transform`, and `transform` interface. Since all coordinates are
+optimized jointly, `transform` returns stored coordinates only for the exact
+training matrix in its original row order. Use `imste.inductive.InductiveIMSTE`
+when new rows need projections. This separate estimator fits an MLP to predict
+the reference coordinates; its default has six hidden layers of 128 units and
+0.1 dropout. It uses a 10% validation split, at least 100 epochs, and patience
+of 20. The MLP is an extension around the core IMSTE objective, not part of the
+embedding algorithm described here.
 
 ## 9. Limitations and interpretation
 
@@ -305,8 +304,8 @@ here.
 - Output distances and axis values are not calibrated quantities. Rotation,
   reflection, and overall scale do not carry intrinsic meaning.
 - The core IMSTE objective does not itself define an out-of-sample projection.
-  The optional MLP projection is an approximation learned from fitted
-  coordinates. Labels are not used during either fit.
+  `InductiveIMSTE` approximates it with an MLP trained on fitted coordinates.
+  Labels are not used during either fit.
 
 ## 10. Summary
 
