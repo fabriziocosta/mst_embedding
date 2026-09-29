@@ -5,7 +5,7 @@ from sklearn.base import clone
 from scipy.spatial.distance import cdist
 
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
-from mst_embedding._estimator import _iterated_mst_edges
+from mst_embedding._estimator import _iterated_mst_edges, _sample_negative_targets
 
 
 def small_data():
@@ -118,6 +118,62 @@ def test_custom_loss_must_depend_on_supplied_distances():
             attraction_loss_fn=disconnected_attraction,
             random_state=5,
         ).fit(small_data())
+
+
+def test_custom_loss_rejects_non_finite_values():
+    def non_finite_attraction(positive_squared_distances, edge_weights):
+        return torch.mean(positive_squared_distances * torch.tensor(float("nan")))
+
+    with pytest.raises(ValueError, match="returned a non-finite loss"):
+        IteratedMinimumSpanningTreeEmbedder(
+            n_msts=1,
+            n_epochs=1,
+            batch_size=100,
+            negative_ratio=0,
+            attraction_loss_fn=non_finite_attraction,
+            random_state=5,
+        ).fit(small_data())
+
+
+def test_dense_negative_sampling_falls_back_to_exact_complement():
+    n_samples = 64
+    packed_adjacency = np.full((n_samples, n_samples // 8), 0xFF, dtype=np.uint8)
+    # Node 0 has exactly one non-neighbor. Rejection sampling alone would need
+    # many draws; the bounded sampler should return that complement directly.
+    packed_adjacency[0, 63 // 8] &= np.uint8(0xFF ^ (1 << (63 & 7)))
+    sampled = _sample_negative_targets(
+        np.random.RandomState(17),
+        packed_adjacency,
+        np.zeros(32, dtype=np.intp),
+        n_samples,
+    )
+    np.testing.assert_array_equal(sampled, np.full(32, 63))
+
+
+def test_mlp_stops_after_patience_once_minimum_epochs_are_met(monkeypatch):
+    class ConstantMLP(torch.nn.Module):
+        def __init__(self, n_features, n_components, n_layers, width, dropout):
+            super().__init__()
+            self.output = torch.nn.Parameter(torch.ones(n_components))
+
+        def forward(self, inputs):
+            return (self.output * 0).expand(inputs.shape[0], -1)
+
+    monkeypatch.setattr("mst_embedding._estimator._MLPProjector", ConstantMLP)
+    estimator = IteratedMinimumSpanningTreeEmbedder(
+        n_msts=1,
+        n_epochs=0,
+        transform_method="mlp",
+        mlp_n_layers=1,
+        mlp_layer_size=4,
+        mlp_dropout=0.0,
+        mlp_epochs=8,
+        mlp_min_epochs=2,
+        mlp_patience=2,
+        random_state=19,
+    ).fit(small_data())
+
+    assert estimator.mlp_epochs_trained_ == 3
 
 
 def test_duplicate_samples_keep_zero_distance_mst_edges():

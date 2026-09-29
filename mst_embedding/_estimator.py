@@ -16,10 +16,7 @@ from sklearn.utils.validation import check_array, check_is_fitted
 
 from .losses import (
     bernoulli_repulsion_loss,
-    direct_attraction_loss,
-    huber_attraction_loss,
     inverse_distance_repulsion_loss,
-    logistic_attraction_loss,
     logistic_repulsion_loss,
     log_attraction_loss,
 )
@@ -72,12 +69,15 @@ def _validate_loss_output(
     distances: torch.Tensor,
     *,
     check_dependency: bool = False,
+    check_finite: bool = False,
 ) -> torch.Tensor:
     if not isinstance(value, torch.Tensor) or value.ndim != 0 or not value.requires_grad:
         raise ValueError(
             f"{name} must return a scalar torch.Tensor that is differentiable "
             "with respect to the supplied distances."
         )
+    if check_finite and not torch.isfinite(value.detach()).item():
+        raise ValueError(f"{name} returned a non-finite loss.")
     if check_dependency and torch.autograd.grad(
         value, distances, retain_graph=True, allow_unused=True
     )[0] is None:
@@ -86,6 +86,41 @@ def _validate_loss_output(
             "reach the embedding coordinates."
         )
     return value
+
+
+def _sample_negative_targets(
+    rng: np.random.RandomState,
+    packed_adjacency: np.ndarray,
+    negative_sources: np.ndarray,
+    n_samples: int,
+) -> np.ndarray:
+    """Sample non-neighbors with rejection and an exact dense-graph fallback."""
+    targets = rng.randint(n_samples, size=negative_sources.size)
+    invalid = np.ones(targets.size, dtype=bool)
+    for _ in range(8):
+        invalid_indices = np.flatnonzero(invalid)
+        if invalid_indices.size == 0:
+            break
+        candidate_targets = targets[invalid_indices]
+        blocked = packed_adjacency[
+            negative_sources[invalid_indices], candidate_targets >> 3
+        ]
+        bit_mask = 1 << (candidate_targets & 7)
+        accepted = (blocked & bit_mask) == 0
+        invalid[invalid_indices[accepted]] = False
+        invalid_indices = invalid_indices[~accepted]
+        targets[invalid_indices] = rng.randint(n_samples, size=invalid_indices.size)
+
+    for source in np.unique(negative_sources[invalid]):
+        source_indices = np.flatnonzero(invalid & (negative_sources == source))
+        blocked = np.unpackbits(
+            packed_adjacency[source], bitorder="little", count=n_samples
+        )
+        candidates = np.flatnonzero(blocked == 0)
+        if candidates.size == 0:
+            raise ValueError("Cannot sample a negative pair for a fully connected node.")
+        targets[source_indices] = rng.choice(candidates, size=source_indices.size)
+    return targets
 
 
 class _MLPProjector(nn.Module):
@@ -112,17 +147,6 @@ def _squared_euclidean_distance(delta: torch.Tensor) -> torch.Tensor:
     return torch.sum(delta * delta, dim=1)
 
 
-def _distance_value(
-    squared_distance: torch.Tensor,
-    distance_type: str,
-    epsilon: float,
-) -> torch.Tensor:
-    """Convert squared Euclidean distance to the configured scalar distance."""
-    if distance_type == "euclidean":
-        return torch.sqrt(squared_distance + epsilon) - epsilon**0.5
-    return squared_distance
-
-
 def _iterated_mst_edges(
     distances: np.ndarray,
     n_msts: int,
@@ -133,7 +157,13 @@ def _iterated_mst_edges(
     when the input contains duplicate samples.
     """
     n_samples = distances.shape[0]
-    available = ~np.eye(n_samples, dtype=bool)
+    available = np.full(
+        (n_samples, (n_samples + 7) // 8), 0xFF, dtype=np.uint8
+    )
+    sample_ids = np.arange(n_samples)
+    available[sample_ids, sample_ids >> 3] &= np.bitwise_not(
+        (1 << (sample_ids & 7)).astype(np.uint8)
+    )
     edges: list[tuple[int, int]] = []
     weights: list[float] = []
 
@@ -157,11 +187,18 @@ def _iterated_mst_edges(
                 other = int(parent[node])
                 edges.append((other, node))
                 weights.append(1.0 / rank)
-                available[other, node] = False
-                available[node, other] = False
+                available[other, node >> 3] &= np.uint8(
+                    0xFF ^ (1 << (node & 7))
+                )
+                available[node, other >> 3] &= np.uint8(
+                    0xFF ^ (1 << (other & 7))
+                )
 
             remaining = ~in_tree
-            connectable = remaining & available[node]
+            available_row = np.unpackbits(
+                available[node], bitorder="little", count=n_samples
+            ).astype(bool)
+            connectable = remaining & available_row
             improve = connectable & (distances[node] < best)
             best[improve] = distances[node, improve]
             parent[improve] = node
@@ -177,7 +214,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     The learned coordinates are attached to the training rows. By default,
     :meth:`transform` accepts only the original training matrix in its original
     row order. Set ``transform_method="mlp"`` to learn an MLP projection for
-    new rows.
+    new rows. The objective uses squared Euclidean distances, logarithmic
+    attraction, and the selected repulsion loss.
 
     Parameters
     ----------
@@ -186,15 +224,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     attraction_normalization : {'weight_sum'}, default='weight_sum'
         Attraction is normalized by the sum of graph edge weights. This option
         is fixed to ``'weight_sum'``.
-    distance_type : {'euclidean', 'squared'}, default='squared'
-        Distance value passed to both attraction and repulsion losses.
-    attraction_dampening : {'direct', 'log', 'logistic', 'huber'}, default='log'
-        Positive-edge loss shape. ``'direct'`` uses the selected distance,
-        ``'log'`` applies ``log(1 + distance + epsilon)``, ``'logistic'`` uses
-        the logistic margin loss, and ``'huber'`` uses a Huber penalty with
-        ``delta=1``. An ``attraction_loss_fn`` overrides this selection.
     logistic_margin : float, default=1.0
-        Distance margin used by logistic attraction and repulsion losses.
+        Squared-distance margin used by the logistic repulsion loss.
     logistic_temperature : float, default=0.5
         Positive temperature controlling the softness of the logistic losses.
     n_components : int, default=2
@@ -243,11 +274,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         Number of training rows per MLP update.
     mlp_learning_rate : float, default=0.001
         Adam learning rate for the MLP.
-    attraction_loss_fn : callable or None, default=None
-        Optional callable with signature ``fn(positive_squared_distances,
-        edge_weights)`` that returns a scalar differentiable PyTorch tensor.
-        When supplied, this overrides the built-in loss selected by
-        ``attraction_dampening``.
     repulsion_loss_fn : callable or None, default=None
         Optional callable with signature ``fn(negative_squared_distances,
         epsilon)`` that returns a scalar differentiable PyTorch tensor. When
@@ -272,12 +298,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         epsilon: float = 1e-4,
         device: str = "auto",
         attraction_normalization: str = "weight_sum",
-        distance_type: str = "squared",
-        attraction_dampening: str = "log",
         logistic_margin: float = 1.0,
         logistic_temperature: float = 0.5,
-        attraction_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
-        | None = None,
         repulsion_loss_fn: Callable[[torch.Tensor, float], torch.Tensor] | None = None,
         repulsion_type: str = "logistic",
         transform_method: str = "direct",
@@ -301,11 +323,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         self.random_state = random_state
         self.epsilon = epsilon
         self.device = device
-        self.distance_type = distance_type
-        self.attraction_dampening = attraction_dampening
         self.logistic_margin = logistic_margin
         self.logistic_temperature = logistic_temperature
-        self.attraction_loss_fn = attraction_loss_fn
         self.repulsion_loss_fn = repulsion_loss_fn
         self.repulsion_type = repulsion_type
         self.transform_method = transform_method
@@ -345,14 +364,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             raise ValueError("mlp_min_epochs must not exceed mlp_epochs.")
         if self.attraction_normalization != "weight_sum":
             raise ValueError("attraction_normalization must be 'weight_sum'.")
-        if self.distance_type not in {"euclidean", "squared"}:
-            raise ValueError(
-                "distance_type must be 'euclidean' or 'squared'."
-            )
-        if self.attraction_dampening not in {"direct", "log", "logistic", "huber"}:
-            raise ValueError(
-                "attraction_dampening must be 'direct', 'log', 'logistic', or 'huber'."
-            )
         n_components = _positive_integer("n_components", self.n_components)
         n_epochs = _positive_integer("n_epochs", self.n_epochs, allow_zero=True)
         batch_size = _positive_integer("batch_size", self.batch_size)
@@ -370,24 +381,12 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         logistic_temperature = _finite_nonnegative(
             "logistic_temperature", self.logistic_temperature, strictly_positive=True
         )
-        if self.attraction_loss_fn is not None and not callable(self.attraction_loss_fn):
-            raise ValueError("attraction_loss_fn must be callable or None.")
         if self.repulsion_loss_fn is not None and not callable(self.repulsion_loss_fn):
             raise ValueError("repulsion_loss_fn must be callable or None.")
         if self.repulsion_type not in {"bernoulli", "inverse_distance", "logistic"}:
             raise ValueError(
                 "repulsion_type must be 'bernoulli', 'inverse_distance', or 'logistic'."
             )
-        use_builtin_attraction_loss = self.attraction_loss_fn is None
-        attraction_loss_fns = {
-            "direct": direct_attraction_loss,
-            "log": log_attraction_loss,
-            "logistic": logistic_attraction_loss,
-            "huber": huber_attraction_loss,
-        }
-        attraction_loss_fn = attraction_loss_fns[self.attraction_dampening]
-        if not use_builtin_attraction_loss:
-            attraction_loss_fn = self.attraction_loss_fn
         if self.repulsion_loss_fn is not None:
             repulsion_loss_fn = self.repulsion_loss_fn
         elif self.repulsion_type == "inverse_distance":
@@ -460,6 +459,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             np.concatenate((edge_sources, edge_targets)), minlength=n_samples
         )
         negative_counts = n_samples - 1 - node_degrees
+        repulsion_dependency_checked = self.repulsion_loss_fn is None
 
         for _ in range(n_epochs):
             order = rng.permutation(len(edge_array))
@@ -474,29 +474,13 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
                 positive_d2 = _squared_euclidean_distance(positive_delta)
-                positive_distance = _distance_value(
-                    positive_d2, self.distance_type, epsilon
+                attraction_value = log_attraction_loss(
+                    positive_d2, weights_t, epsilon
                 )
-                if use_builtin_attraction_loss:
-                    if self.attraction_dampening == "logistic":
-                        attraction_value = attraction_loss_fn(
-                            positive_distance,
-                            weights_t,
-                            epsilon,
-                            logistic_margin,
-                            logistic_temperature,
-                        )
-                    else:
-                        attraction_value = attraction_loss_fn(
-                            positive_distance, weights_t, epsilon
-                        )
-                else:
-                    attraction_value = attraction_loss_fn(positive_d2, weights_t)
                 attraction = _validate_loss_output(
-                    "attraction_loss_fn",
+                    "log_attraction_loss",
                     attraction_value,
-                    positive_d2 if not use_builtin_attraction_loss else positive_distance,
-                    check_dependency=not use_builtin_attraction_loss,
+                    positive_d2,
                 )
 
                 # Positive edges are undirected, so both endpoints contribute
@@ -507,23 +491,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                 ]
                 if negative_ratio and eligible_sources.size:
                     negative_sources = np.repeat(eligible_sources, negative_ratio)
-                    negative_targets = rng.randint(
-                        n_samples, size=negative_sources.size
+                    negative_targets = _sample_negative_targets(
+                        rng, packed_adjacency, negative_sources, n_samples
                     )
-                    invalid = np.ones(negative_targets.size, dtype=bool)
-                    while np.any(invalid):
-                        blocked = packed_adjacency[
-                            negative_sources[invalid],
-                            negative_targets[invalid] >> 3,
-                        ]
-                        bit_mask = 1 << (negative_targets[invalid] & 7)
-                        invalid_indices = np.flatnonzero(invalid)
-                        accepted = (blocked & bit_mask) == 0
-                        invalid[invalid_indices[accepted]] = False
-                        invalid_indices = invalid_indices[~accepted]
-                        negative_targets[invalid_indices] = rng.randint(
-                            n_samples, size=invalid_indices.size
-                        )
                     ni = torch.as_tensor(
                         negative_sources, dtype=torch.long, device=compute_device
                     )
@@ -532,28 +502,25 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                     )
                     negative_delta = coordinates[ni] - coordinates[nj]
                     negative_d2 = _squared_euclidean_distance(negative_delta)
-                    negative_distance = _distance_value(
-                        negative_d2, self.distance_type, epsilon
-                    )
                     if self.repulsion_loss_fn is not None:
                         negative_loss = repulsion_loss_fn(negative_d2, epsilon)
                     elif self.repulsion_type == "logistic":
                         negative_loss = repulsion_loss_fn(
-                            negative_distance,
+                            negative_d2,
                             epsilon,
                             logistic_margin,
                             logistic_temperature,
                         )
                     else:
-                        negative_loss = repulsion_loss_fn(negative_distance, epsilon)
+                        negative_loss = repulsion_loss_fn(negative_d2, epsilon)
                     repulsion = _validate_loss_output(
                         "repulsion_loss_fn",
                         negative_loss,
-                        negative_d2
-                        if self.repulsion_loss_fn is not None
-                        else negative_distance,
-                        check_dependency=self.repulsion_loss_fn is not None,
+                        negative_d2,
+                        check_dependency=not repulsion_dependency_checked,
+                        check_finite=self.repulsion_loss_fn is not None,
                     )
+                    repulsion_dependency_checked = True
                 else:
                     # Some small or dense graphs have no eligible negatives.
                     repulsion = coordinates.sum() * 0.0
@@ -661,6 +628,11 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                             ).cpu()
                         )
                     self.mlp_.train()
+                    if not np.isfinite(validation_loss):
+                        raise ValueError(
+                            "MLP validation loss became non-finite; lower the learning "
+                            "rate or rescale the input data."
+                        )
                     if validation_loss < best_validation_loss:
                         best_validation_loss = validation_loss
                         best_state = {
@@ -677,6 +649,10 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                         break
                 if best_state is not None:
                     self.mlp_.load_state_dict(best_state)
+                else:
+                    raise ValueError(
+                        "MLP training did not produce a finite validation checkpoint."
+                    )
                 self.mlp_.eval()
                 with torch.no_grad():
                     training_prediction = self.mlp_(X_mlp_t[training_indices_t])
