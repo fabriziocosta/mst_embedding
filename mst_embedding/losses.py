@@ -8,14 +8,14 @@ def log_attraction_loss(
     edge_weights: torch.Tensor,
     epsilon: float = 0.0,
 ) -> torch.Tensor:
-    """Mean rank-weighted log penalty on the configured positive distance."""
+    """Mean rank-weighted log penalty on squared positive distances."""
     return torch.mean(
         edge_weights * torch.log1p(positive_squared_distances + epsilon)
     )
 
 
 def logistic_repulsion_loss(
-    negative_distances: torch.Tensor,
+    negative_squared_distances: torch.Tensor,
     epsilon: float,
     margin: float,
     temperature: float,
@@ -23,7 +23,9 @@ def logistic_repulsion_loss(
     """Negative-pair logistic loss, high below the margin and low above it."""
     del epsilon
     return torch.mean(
-        torch.nn.functional.softplus((margin - negative_distances) / temperature)
+        torch.nn.functional.softplus(
+            (margin - negative_squared_distances) / temperature
+        )
     )
 
 

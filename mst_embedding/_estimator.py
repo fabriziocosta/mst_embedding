@@ -280,8 +280,8 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
         supplied, this overrides ``repulsion_type``.
     repulsion_type : {'bernoulli', 'inverse_distance', 'logistic'}, default='logistic'
         Built-in negative-pair loss. ``'inverse_distance'`` selects the
-        ``1 / (1 + distance + epsilon)`` penalty; ``'logistic'`` selects the
-        negative logistic margin loss. This is ignored when
+        ``1 / (1 + squared_distance + epsilon)`` penalty; ``'logistic'``
+        selects the negative logistic margin loss. This is ignored when
         ``repulsion_loss_fn`` is supplied.
     """
 

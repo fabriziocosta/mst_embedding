@@ -5,7 +5,11 @@ from sklearn.base import clone
 from scipy.spatial.distance import cdist
 
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
-from mst_embedding._estimator import _iterated_mst_edges, _sample_negative_targets
+from mst_embedding._estimator import (
+    _iterated_mst_edges,
+    _sample_negative_targets,
+    log_attraction_loss,
+)
 
 
 def small_data():
@@ -103,10 +107,10 @@ def test_dataframe_transform_rejects_reordered_feature_names():
 
 
 def test_custom_loss_must_depend_on_supplied_distances():
-    def disconnected_attraction(positive_squared_distances, edge_weights):
-        del edge_weights
+    def disconnected_repulsion(negative_squared_distances, epsilon):
+        del epsilon
         return torch.ones(
-            (), device=positive_squared_distances.device, requires_grad=True
+            (), device=negative_squared_distances.device, requires_grad=True
         )
 
     with pytest.raises(ValueError, match="must depend on the supplied distances"):
@@ -114,23 +118,24 @@ def test_custom_loss_must_depend_on_supplied_distances():
             n_msts=1,
             n_epochs=1,
             batch_size=100,
-            negative_ratio=0,
-            attraction_loss_fn=disconnected_attraction,
+            negative_ratio=1,
+            repulsion_loss_fn=disconnected_repulsion,
             random_state=5,
         ).fit(small_data())
 
 
 def test_custom_loss_rejects_non_finite_values():
-    def non_finite_attraction(positive_squared_distances, edge_weights):
-        return torch.mean(positive_squared_distances * torch.tensor(float("nan")))
+    def non_finite_repulsion(negative_squared_distances, epsilon):
+        del epsilon
+        return torch.mean(negative_squared_distances * torch.tensor(float("nan")))
 
     with pytest.raises(ValueError, match="returned a non-finite loss"):
         IteratedMinimumSpanningTreeEmbedder(
             n_msts=1,
             n_epochs=1,
             batch_size=100,
-            negative_ratio=0,
-            attraction_loss_fn=non_finite_attraction,
+            negative_ratio=1,
+            repulsion_loss_fn=non_finite_repulsion,
             random_state=5,
         ).fit(small_data())
 
@@ -246,13 +251,20 @@ def test_exact_graph_uses_euclidean_distances():
     assert set(estimator.graph_weights_) == {1.0, 0.5}
 
 
-def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale():
+def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale(monkeypatch):
     X = small_data()
     observed_weights = []
+    original_log_attraction_loss = log_attraction_loss
 
-    def capture_attraction_weights(positive_squared_distances, edge_weights):
+    def capture_attraction_weights(positive_squared_distances, edge_weights, epsilon):
         observed_weights.extend(edge_weights.detach().cpu().numpy())
-        return torch.mean(edge_weights * torch.log1p(positive_squared_distances))
+        return original_log_attraction_loss(
+            positive_squared_distances, edge_weights, epsilon
+        )
+
+    monkeypatch.setattr(
+        "mst_embedding._estimator.log_attraction_loss", capture_attraction_weights
+    )
 
     estimator = IteratedMinimumSpanningTreeEmbedder(
         n_msts=2,
@@ -261,7 +273,6 @@ def test_weight_sum_attraction_normalization_uses_global_weight_sum_scale():
         negative_ratio=0,
         random_state=3,
         attraction_normalization="weight_sum",
-        attraction_loss_fn=capture_attraction_weights,
     ).fit(X)
 
     expected = estimator.graph_weights_ * (

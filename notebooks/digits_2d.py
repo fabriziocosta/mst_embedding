@@ -176,26 +176,9 @@ def display_interactive_embedding(
         description="Repulsion dampening",
         style={"description_width": "initial"},
     )
-    distance_type = widgets.Dropdown(
-        options=[("Squared Euclidean", "squared"), ("Euclidean", "euclidean")],
-        value="squared",
-        description="Distance",
-        style={"description_width": "initial"},
-    )
-    attraction_dampening = widgets.Dropdown(
-        options=[
-            ("Direct", "direct"),
-            ("Log", "log"),
-            ("Logistic margin", "logistic"),
-            ("Huber", "huber"),
-        ],
-        value="log",
-        description="Attraction dampening",
-        style={"description_width": "initial"},
-    )
     logistic_margin = widgets.FloatSlider(
         value=1.0, min=0.0, max=5.0, step=0.1,
-        description="Logistic margin",
+        description="Squared-distance margin",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -414,8 +397,6 @@ def display_interactive_embedding(
         n_msts.value = 10
         lambda_rep.value = 0.5
         repulsion_type.value = "logistic"
-        distance_type.value = "squared"
-        attraction_dampening.value = "log"
         logistic_margin.value = 1.0
         logistic_temperature.value = 0.5
         negative_ratio.value = 5
@@ -456,8 +437,6 @@ def display_interactive_embedding(
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
                     repulsion_type=repulsion_type.value,
-                    distance_type=distance_type.value,
-                    attraction_dampening=attraction_dampening.value,
                     logistic_margin=logistic_margin.value,
                     logistic_temperature=logistic_temperature.value,
                     transform_method=transform_method.value,
@@ -498,10 +477,7 @@ def display_interactive_embedding(
                     ).mean()
                     knn_title = f" · 5-NN 5-fold CV accuracy={knn_accuracy:.3f}"
                 logistic_title = ""
-                if (
-                    attraction_dampening.value == "logistic"
-                    or repulsion_type.value == "logistic"
-                ):
+                if repulsion_type.value == "logistic":
                     logistic_title = (
                         f" · logistic m={logistic_margin.value:.1f}, "
                         f"τ={logistic_temperature.value:.2f}"
@@ -525,8 +501,7 @@ def display_interactive_embedding(
                         f"2D IMSTE · {DATASET_LABELS[active_dataset['name']]} · "
                         f"{n_samples:,} samples · "
                         f"{n_msts.value} MSTs · inverse-rank weights · "
-                        f"{distance_type.value} distance · "
-                        f"{attraction_dampening.value} attraction · "
+                        "squared distance · log attraction · "
                         f"{repulsion_type.value} repulsion · weight_sum · "
                         f"1,000 epochs{logistic_title}{knn_title}"
                     ),
@@ -570,8 +545,7 @@ def display_interactive_embedding(
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([batch_size]),
             widgets.HBox([lambda_rep, negative_ratio]),
-            widgets.HBox([distance_type]),
-            widgets.HBox([attraction_dampening, repulsion_type]),
+            widgets.HBox([repulsion_type]),
             widgets.HBox([logistic_margin, logistic_temperature]),
             widgets.HBox([compute_knn]),
             widgets.HBox([transform_method]),
@@ -600,8 +574,6 @@ def display_interactive_embedding(
             "batch_size": batch_size,
             "n_msts": n_msts,
             "lambda_rep": lambda_rep,
-            "distance_type": distance_type,
-            "attraction_dampening": attraction_dampening,
             "repulsion_type": repulsion_type,
             "logistic_margin": logistic_margin,
             "logistic_temperature": logistic_temperature,

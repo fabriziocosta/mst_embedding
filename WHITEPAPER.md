@@ -100,10 +100,8 @@ $$
 d_{ij}^2=\sum_{k=1}^{q}(y_{ik}-y_{jk})^2.
 $$
 
-Let $z_{ij}$ be the configured embedding distance value. With the default
-`distance_type="squared"`, $z_{ij}=d_{ij}^2$. With
-`distance_type="euclidean"`, $z_{ij}=\sqrt{d_{ij}^2+\epsilon}-\sqrt{\epsilon}$.
-The default logarithmic objective uses the pairwise edge probability:
+The estimator uses squared Euclidean distance, so $z_{ij}=d_{ij}^2$. The
+logarithmic objective uses the pairwise edge probability:
 
 $$
 q_{ij}=\frac{1}{1+z_{ij}+\epsilon}.
@@ -128,30 +126,9 @@ because more, lower-weight MST ranks were added. With minibatch optimization,
 the implementation scales each minibatch's weighted mean by the graph-wide
 ratio `|E| / sum(w)` to estimate this normalized objective.
 
-The attraction dampening is selected with `attraction_dampening`. The default
-`"log"` uses the loss above. `"direct"` uses $z_{ij}$, and `"huber"` applies
-a Huber penalty to $z_{ij}$ with transition $\delta=1$. `"logistic"` uses
-
-$$
-\rho^+_{ij}=\operatorname{softplus}\left(\frac{z_{ij}-m}{\tau}\right)
--\operatorname{softplus}\left(-\frac{m}{\tau}\right),
-$$
-
-where $m$ is `logistic_margin` and $\tau$ is `logistic_temperature`.
-The separate `distance_type` setting chooses Euclidean or squared Euclidean
-values. These two controls set the distance coordinate and positive-edge
-loss shape.
-
-For direct Euclidean distance, the smoothed distance value is
-
-$$
-\rho_{\mathrm{euclidean}}(d)=\sqrt{d^2+\epsilon}-\sqrt{\epsilon},
-$$
-
-The Huber penalty uses $\rho(s)=\frac{1}{2}s^2$ for $s\leq1$ and
-$\rho(s)=s-\frac{1}{2}$ for $s>1$. All attraction variants use the same edge
-weights and weight-sum normalization. A custom `attraction_loss_fn` takes
-precedence over `attraction_dampening`.
+This logarithmic objective is the only built-in attraction. It always acts on
+squared Euclidean distances and uses the same edge weights and weight-sum
+normalization described above.
 
 ### 4.2 Repulsion on sampled non-edges
 
@@ -173,8 +150,7 @@ L_{uv}^{-}=-\log(1-q_{uv})
 =\log\!\left(1+\frac{1}{z_{uv}+\epsilon}\right).
 $$
 
-Here $z_{uv}$ uses the selected `distance_type` in the same way as for
-positive edges.
+Here $z_{uv}=d_{uv}^2$ is the squared Euclidean embedding distance.
 
 Alternatively, `repulsion_type="inverse_distance"` selects the original
 penalty:
@@ -190,8 +166,8 @@ $$
 L_{uv}^{-}=\operatorname{softplus}\left(\frac{m-z_{uv}}{\tau}\right),
 $$
 
-with the same `logistic_margin` $m$ and `logistic_temperature` $\tau$ used by
-logistic attraction. The default is `repulsion_type="logistic"`. All three
+with `logistic_margin` $m$ and `logistic_temperature` $\tau$. The default is
+`repulsion_type="logistic"`. All three
 repulsion types use the unweighted mean of losses over the
 sampled set of negative pairs. The MST-rank weights are not applied to
 negative samples.
@@ -212,15 +188,11 @@ weight to the two terms. The implementation normalizes the weighted
 positive-edge losses by their graph-wide total weight; the negative term is
 unchanged.
 
-The losses are modular. The estimator accepts an optional
-`attraction_loss_fn` callable that receives positive squared distances and
-edge weights scaled for graph-wide total-weight normalization, and an optional
+The logarithmic attraction is fixed. The estimator accepts an optional
 `repulsion_loss_fn` callable that receives negative squared distances and
-epsilon. Each callable must return a scalar differentiable PyTorch tensor. If
-either hook is omitted, its built-in default is used. `repulsion_type` selects
-between the built-in negative-pair losses unless `repulsion_loss_fn` overrides
-it. The estimator optimizes the sample coordinates; custom loss functions are
-not themselves trained.
+epsilon and must return a scalar differentiable PyTorch tensor. If omitted,
+`repulsion_type` selects the built-in negative-pair loss. The estimator
+optimizes sample coordinates; a custom loss function is not itself trained.
 
 ## 5. Optimization procedure
 
@@ -230,17 +202,16 @@ negative pairs for eligible sources, computes repulsion, and updates all
 coordinates with Adam. After each update it subtracts the coordinate mean,
 removing global translation drift without changing pairwise differences.
 
-The estimator uses Euclidean distance for graph construction and embedding,
-with a fixed inverse-rank weight for each edge.
+The estimator uses Euclidean distance for graph construction and squared
+Euclidean distance in the embedding objective, with a fixed inverse-rank
+weight for each edge.
 
 | Parameter | Default | Role |
 | --- | ---: | --- |
 | `n_msts` | 10 | Number of edge-disjoint MSTs |
 | `attraction_normalization` | `weight_sum` (fixed) | Attraction denominator: total edge weight |
-| `distance_type` | `squared` | Distance value shared by attraction and repulsion: Euclidean or squared Euclidean |
-| `attraction_dampening` | `log` | Positive-edge shaping: direct, log, logistic, or Huber |
-| `logistic_margin` | 1.0 | Distance margin for logistic attraction and repulsion |
-| `logistic_temperature` | 0.5 | Softness of the logistic losses; must be positive |
+| `logistic_margin` | 1.0 | Squared-distance margin for logistic repulsion |
+| `logistic_temperature` | 0.5 | Softness of the logistic repulsion; must be positive |
 | `n_components` | 2 | Number of output dimensions |
 | `n_epochs` | 1000 | Number of passes over the positive edges |
 | `batch_size` | 4096 | Positive edges per optimization step |

@@ -61,12 +61,11 @@ weight `1 / r`, so later trees contribute less.
 
 Each observation gets a trainable coordinate vector `y_i` in
 `n_components` dimensions. For a pair, let `t = sum_k (y_ik - y_jk) ** 2`.
-`distance_type="squared"` (the default) uses `z=t`; `"euclidean"` uses a
-smoothed Euclidean distance. Positive graph edges apply the selected
-`attraction_dampening` to `z`; sampled non-edges apply the selected
-`repulsion_type`. The defaults, `log` attraction and `logistic` repulsion,
-combine a logarithmic positive-edge loss with a margin-based negative-edge
-loss. `bernoulli` retains the negative pairwise probability loss.
+The estimator always uses squared Euclidean distance. Positive graph edges use
+logarithmic attraction, `log1p(t + epsilon)`; sampled non-edges apply the
+selected `repulsion_type`. The default `logistic` repulsion combines this with
+a margin-based negative-pair loss. `bernoulli` uses the negative pairwise
+probability loss.
 `inverse_distance` uses
 `1 / (1 + z + epsilon)`, while `logistic` uses a margin-based loss. Negative
 losses are averaged without MST-rank weights. Adam minimizes the convex combination
@@ -134,8 +133,7 @@ The estimator exposes `fit`, `fit_transform`, and `transform`. The default
 matrix only. `transform_method="mlp"` additionally fits an MLP so `transform`
 can project unseen rows.
 
-The main parameters are `n_msts=10`, `distance_type="squared"`,
-`attraction_dampening="log"`, `repulsion_type="logistic"`,
+The main parameters are `n_msts=10`, `repulsion_type="logistic"`,
 `logistic_margin=1.0`, `logistic_temperature=0.5`, `n_components=2`, `n_epochs=1000`,
 `batch_size=4096`, `learning_rate=0.05`,
 `negative_ratio=5`, `lambda_rep=0.5`, `epsilon=1e-4`, `random_state=42`, and
@@ -153,34 +151,24 @@ selected backend is available as `estimator.device_` after fitting.
 
 Attraction is normalized by the sum of graph edge weights. This keeps its
 scale more consistent as additional low-weight MST ranks are added.
-Choose `distance_type="euclidean"` or `"squared"`. Attraction dampening can
-be `"direct"`, `"log"`, `"logistic"`, or `"huber"`; repulsion can be
-`"bernoulli"`, `"inverse_distance"`, or `"logistic"`. Logistic margin and
-temperature apply to both logistic losses. The Huber transition is at 1 in
-the selected distance units. A custom `attraction_loss_fn` overrides the
-built-in attraction dampening.
+Repulsion can be `"bernoulli"`, `"inverse_distance"`, or `"logistic"`.
+Logistic margin and temperature control the logistic repulsion loss.
 
-The attraction and repulsion losses can be replaced independently with
-`attraction_loss_fn` and `repulsion_loss_fn`. Each callable must return a scalar
-PyTorch tensor that remains differentiable with respect to its distance input.
-For example, to use a quadratic attraction while keeping the default
-repulsion:
+The built-in logarithmic attraction is fixed. The repulsion loss can optionally
+be replaced with `repulsion_loss_fn`, which must return a scalar PyTorch tensor
+differentiable with respect to its squared-distance input. For example:
 
 ```python
-import torch
 from mst_embedding import IteratedMinimumSpanningTreeEmbedder
 
-def quadratic_attraction(positive_squared_distances, edge_weights):
-    return torch.mean(edge_weights * positive_squared_distances)
+def custom_repulsion(negative_squared_distances, epsilon):
+    return torch.mean(1.0 / (negative_squared_distances + epsilon))
 
 embedding = IteratedMinimumSpanningTreeEmbedder(
-    attraction_loss_fn=quadratic_attraction,
+    repulsion_loss_fn=custom_repulsion,
 ).fit_transform(X)
 ```
 
-The built-in `log_attraction_loss`, `direct_attraction_loss`,
-`euclidean_attraction_loss`, `squared_distance_attraction_loss`,
-`huber_attraction_loss`, `logistic_attraction_loss`,
-`bernoulli_repulsion_loss`, `inverse_distance_repulsion_loss`, and
-`logistic_repulsion_loss` functions are exported from `mst_embedding` for
-reuse or comparison.
+The built-in `log_attraction_loss`, `bernoulli_repulsion_loss`,
+`inverse_distance_repulsion_loss`, and `logistic_repulsion_loss` functions are
+exported from `mst_embedding` for reuse or comparison.
