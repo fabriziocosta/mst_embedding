@@ -198,7 +198,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
     logistic_margin : float, default=1.0
         Squared-distance margin used by the logistic repulsion loss.
     logistic_temperature : float, default=0.5
-        Positive temperature controlling the softness of the logistic losses.
+        Positive temperature controlling the softness of logistic repulsion.
     n_components : int, default=2
         Number of embedding coordinates per sample.
     n_epochs : int, default=1000
@@ -413,10 +413,9 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
 
                 positive_delta = coordinates[src_t] - coordinates[dst_t]
                 positive_d2 = _squared_euclidean_distance(positive_delta)
-                attraction_value = log_attraction_loss(
+                attraction = log_attraction_loss(
                     positive_d2, weights_t, epsilon
                 )
-                attraction = attraction_value
 
                 # Positive edges are undirected, so both endpoints contribute
                 # negative anchors regardless of Prim's stored orientation.
@@ -439,7 +438,6 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
                     negative_d2 = _squared_euclidean_distance(negative_delta)
                     repulsion = logistic_repulsion_loss(
                         negative_d2,
-                        epsilon,
                         logistic_margin,
                         logistic_temperature,
                     )

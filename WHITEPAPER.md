@@ -149,7 +149,7 @@ $$
 L_{uv}^{-}=\operatorname{softplus}\left(\frac{m-z_{uv}}{\tau}\right),
 $$
 
-with `logistic_margin` $m$ and `logistic_temperature` $\tau$. The default is
+with `logistic_margin` $m$ and `logistic_temperature` $\tau$.
 The negative loss is averaged over sampled pairs without MST-rank weights.
 Nearby negative pairs incur a larger cost and are pushed apart. If a graph
 has no eligible negative pairs, the repulsive term is zero for that step.
