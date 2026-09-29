@@ -92,9 +92,6 @@ def display_interactive_embedding(
     """
     if max_instances < 500:
         raise ValueError("max_instances must be at least 500.")
-    # Keep an equally sized novel pool from the 70,000-row digit datasets.
-    # Requests above half the pool use the largest available training split.
-    max_instances = min(max_instances, 35_000)
     if initial_sample_count < 500:
         raise ValueError("initial_sample_count must be at least 500.")
     initial_sample_count = min(initial_sample_count, max_instances)
@@ -112,18 +109,20 @@ def display_interactive_embedding(
     status = widgets.HTML(value="Loading stratified MNIST sample pool...")
     display(status)
     max_training_instances = max_instances
-    max_pool_instances = 2 * max_training_instances
+    max_pool_instances = min(70_000, 2 * max_training_instances)
     X_pool, labels_pool = _load_balanced_pool(
         "mnist", max_pool_instances, random_state
     )
     pool_cache = {"mnist": (X_pool, labels_pool)}
     active_dataset = {"name": "mnist"}
-    max_training_instances = min(max_training_instances, len(X_pool) // 2)
+    novel_reserve = min(500, max(1, len(X_pool) // 2))
+    max_training_instances = min(max_training_instances, len(X_pool) - novel_reserve)
     initial_sample_count = min(initial_sample_count, max_training_instances)
     minimum_sample_count = min(500, max_training_instances)
     status.value = (
         f"{DATASET_LABELS['mnist']} pool available: {len(X_pool):,} samples "
-        f"({max_training_instances:,} training plus an equally sized novel pool). "
+        f"(up to {max_training_instances:,} training rows, with remaining rows "
+        "available for novel predictions). "
         f"Default selection: {initial_sample_count:,} samples, 10 MSTs with "
         "exact Prim, "
         "squared distance, log attraction, logistic repulsion, "
@@ -143,7 +142,7 @@ def display_interactive_embedding(
     batch_size = widgets.IntSlider(
         value=8192,
         min=256,
-        max=16384,
+        max=32768,
         step=256,
         description="Embedding batch size",
         continuous_update=False,
@@ -285,8 +284,8 @@ def display_interactive_embedding(
     mlp_button = widgets.Button(
         description="Compare reference and novel predictions",
         tooltip=(
-            "Compare the training embedding with predictions for a disjoint, "
-            "same-size batch from the same dataset."
+            "Compare the training embedding with predictions for the remaining "
+            "disjoint rows, up to the training batch size."
         ),
         icon="eye",
         disabled=True,
@@ -409,12 +408,14 @@ def display_interactive_embedding(
                 )
             active_dataset["name"] = selected
             X_selected, _ = pool_cache[selected]
-            sample_count.max = min(max_instances, len(X_selected) // 2)
+            novel_reserve = min(500, max(1, len(X_selected) // 2))
+            sample_count.max = min(max_instances, len(X_selected) - novel_reserve)
             sample_count.value = min(sample_count.value, sample_count.max)
             status.value = (
                 f"{DATASET_LABELS[selected]} pool available: "
-                f"{len(X_selected):,} samples ({sample_count.max:,} training plus "
-                "an equally sized novel pool). Adjust controls and click Fit embedding."
+                f"{len(X_selected):,} samples (up to {sample_count.max:,} training "
+                "rows, with remaining rows available for novel predictions). "
+                "Adjust controls and click Fit embedding."
             )
         except Exception:
             status.value = f"Could not load {DATASET_LABELS[selected]}; see error details."
@@ -468,12 +469,13 @@ def display_interactive_embedding(
                 X_pool, labels_pool = pool_cache[active_dataset["name"]]
                 X = X_pool[:n_samples]
                 labels = labels_pool[:n_samples]
-                novel_X = X_pool[n_samples : 2 * n_samples]
-                novel_labels = labels_pool[n_samples : 2 * n_samples]
-                if len(novel_X) != n_samples:
+                novel_count = min(n_samples, len(X_pool) - n_samples)
+                novel_X = X_pool[n_samples : n_samples + novel_count]
+                novel_labels = labels_pool[n_samples : n_samples + novel_count]
+                if len(novel_X) == 0:
                     raise ValueError(
-                        "The selected dataset pool does not contain enough novel "
-                        "rows for a same-size prediction batch."
+                        "The selected dataset pool does not contain any novel rows "
+                        "for prediction."
                     )
                 epochs = n_epochs.value
 
