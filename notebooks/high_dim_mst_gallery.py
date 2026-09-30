@@ -170,6 +170,7 @@ def run_high_dim_mst_gallery(
     max_samples: int = 1000,
     n_msts: int = 15,
     n_epochs: int = 200,
+    mst_method: str = "famst",
     negative_ratio: int = 5,
     lambda_rep: float = 0.5,
     sample_plot_rows: int = 2,
@@ -184,6 +185,8 @@ def run_high_dim_mst_gallery(
     """
     if max_samples < 10:
         raise ValueError("max_samples must be at least 10.")
+    if mst_method not in {"prim", "famst"}:
+        raise ValueError("mst_method must be either 'prim' or 'famst'.")
     if (
         isinstance(sample_plot_rows, (bool, np.bool_))
         or not isinstance(sample_plot_rows, numbers.Integral)
@@ -203,7 +206,10 @@ def run_high_dim_mst_gallery(
             n_rows=int(sample_plot_rows),
             random_state=random_state,
         )
-        print(f"Fitting {name} on {resolved_device} ...", flush=True)
+        print(
+            f"Fitting {name} with {mst_method.upper()} on {resolved_device} ...",
+            flush=True,
+        )
         pipeline = Pipeline(
             [
                 ("normalize", StandardScaler()),
@@ -213,6 +219,7 @@ def run_high_dim_mst_gallery(
                         n_msts=n_msts,
                         n_components=2,
                         n_epochs=n_epochs,
+                        mst_method=mst_method,
                         learning_rate=0.05,
                         negative_ratio=negative_ratio,
                         lambda_rep=lambda_rep,
@@ -243,6 +250,7 @@ def run_high_dim_mst_gallery(
                 "features": feature_count,
                 "classes": len(np.unique(labels)),
                 "n_msts": n_msts,
+                "mst_method": mst_method,
                 "n_epochs": n_epochs,
                 "negative_ratio": negative_ratio,
                 "lambda_rep": lambda_rep,
@@ -262,10 +270,13 @@ def run_high_dim_mst_gallery(
             alpha=0.8,
             linewidths=0,
         )
+        graph_description = (
+            "approximate FAMST graph" if mst_method == "famst" else "exact Prim graph"
+        )
         ax.set_title(
             f"{name} — {len(X):,} samples × "
             f"{feature_count:,} features passed to IMSTE; "
-            f"exact Euclidean graph; {mst_summary}; "
+            f"{graph_description}; {mst_summary}; "
             f"{n_epochs} epochs; {elapsed:.2f} s"
         )
         ax.set_xlabel("Embedding dimension 1")

@@ -506,4 +506,12 @@ def iterated_famst_edges(
                 f"spanning trees with up to {current_neighbors} neighbors. "
                 "Increase mst_max_neighbors or reduce n_msts."
             )
-        current_neighbors = min(cap, max(current_neighbors + 1, current_neighbors * 2))
+        # A failed candidate graph means another full NNDescent build is
+        # required. When the cap is close, skip intermediate rebuilds; for a
+        # much larger cap, grow geometrically to avoid an oversized graph.
+        if cap <= current_neighbors * 8:
+            current_neighbors = cap
+        else:
+            current_neighbors = min(
+                cap, max(current_neighbors + 1, current_neighbors * 2)
+            )

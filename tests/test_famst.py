@@ -95,6 +95,41 @@ def test_famst_still_constructs_requested_tree(monkeypatch):
     np.testing.assert_array_equal(weights, np.ones(len(X) - 1))
 
 
+def test_famst_jumps_to_neighbor_cap_after_first_failed_graph(monkeypatch):
+    X, edges, _ = _separated_components()
+    requested_neighbors = []
+    extraction_calls = []
+
+    def fake_ann(X, neighbors, random_state):
+        requested_neighbors.append(neighbors)
+        return dict(edges)
+
+    def fake_kruskal(n_samples, candidate_edges, n_msts, **kwargs):
+        extraction_calls.append(1)
+        if len(extraction_calls) == 1:
+            return None
+        return (
+            np.zeros((n_samples - 1, 2), dtype=np.intp),
+            np.ones(n_samples - 1, dtype=np.int32),
+        )
+
+    monkeypatch.setattr("imste.mst.famst._ann_edges", fake_ann)
+    monkeypatch.setattr(
+        "imste.mst.famst._kruskal_edge_disjoint_trees", fake_kruskal
+    )
+    iterated_famst_edges(
+        X,
+        n_msts=1,
+        random_state=9,
+        neighbors=1,
+        inter_component_edges=1,
+        max_neighbors=4,
+        representatives_per_component=2,
+    )
+
+    assert requested_neighbors == [2, 4]
+
+
 def test_compiled_kruskal_returns_edge_disjoint_trees_and_integer_ranks():
     candidates = {
         (0, 1): 1.0,

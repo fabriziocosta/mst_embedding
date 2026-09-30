@@ -24,6 +24,25 @@ dominated the 10,000-row fit. The 10,000-row result shows that optimizer work is
 small after the refactor, while adaptive ANN construction remains the main
 performance target.
 
+## M5 Pro FAMST retry experiment
+
+On the workspace's Apple M5 Pro (arm64), a 10,000-row, 32-feature, 15-tree,
+50-epoch fit with seed 0 was measured before and after changing FAMST's retry
+policy. The old policy rebuilt the ANN graph at each doubled neighbor count;
+the new policy jumps to the configured cap when it is within eight times the
+current count, while retaining gradual growth when the cap is much larger.
+
+| Retry policy | Graph (s) | Optimizer (s) | Fit (s) | Trustworthiness | kNN preservation |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Double each retry | 20.217 | 0.676 | 20.894 | 0.9807 | 0.0321 |
+| Skip intermediate retry | 14.474 | 0.693 | 15.167 | 0.9807 | 0.0321 |
+
+These are single-run measurements. The 2,000-row workload with the new policy
+measured 0.578 s graph construction, 0.102 s optimization, and 0.681 s total
+fit time across two runs; its trustworthiness was 0.9808 and kNN preservation
+was 0.1336. Small graphs retain geometric neighbor growth to avoid jumping to
+an unnecessarily large candidate graph.
+
 Reproduce with:
 
 ```sh
