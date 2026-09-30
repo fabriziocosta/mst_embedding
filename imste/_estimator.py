@@ -305,6 +305,7 @@ class IteratedMinimumSpanningTreeEmbedder(TransformerMixin, BaseEstimator):
             margin=logistic_margin,
             temperature=logistic_temperature,
             random_state=seed,
+            schedule_by_rank=self.mst_method != "prim",
             progress_callback=self.progress_callback,
         )
         self.embedding_optimization_time_ = time.perf_counter() - embedding_started

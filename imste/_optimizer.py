@@ -108,6 +108,7 @@ def _optimize_epoch(
     epoch: int,
     n_epochs: int,
     expected_active_edges: float,
+    schedule_by_rank: bool,
     learning_rate: float,
     negative_ratio: int,
     lambda_rep: float,
@@ -125,7 +126,7 @@ def _optimize_epoch(
     active_count = 0
     for edge_index in range(n_edges):
         rank = tree_ranks[edge_index]
-        if epoch % rank == phases[rank]:
+        if not schedule_by_rank or epoch % rank == phases[rank]:
             active[active_count] = edge_index
             active_count += 1
     # Fisher-Yates ordering keeps sequential SGD reproducible.
@@ -162,7 +163,10 @@ def _optimize_epoch(
         for component in range(n_components):
             delta = embedding[left, component] - embedding[right, component]
             d2 += delta * delta
-        attraction_factor = alpha * positive_scale * _attraction_factor(d2, epsilon)
+        edge_weight = 1.0 / tree_ranks[edge_index] if not schedule_by_rank else 1.0
+        attraction_factor = (
+            alpha * positive_scale * edge_weight * _attraction_factor(d2, epsilon)
+        )
         for component in range(n_components):
             delta = embedding[left, component] - embedding[right, component]
             update = attraction_factor * delta
@@ -209,9 +213,10 @@ def optimize_embedding(
     margin: float,
     temperature: float,
     random_state: int | None,
+    schedule_by_rank: bool = True,
     progress_callback=None,
 ) -> None:
-    """Optimize coordinates in place using rank-scheduled, normalized SGD."""
+    """Optimize in place using scheduled edges or explicit inverse-rank weights."""
     n_samples = embedding.shape[0]
     edge_pairs = np.asarray(edges, dtype=np.int64)
     ranks = np.asarray(tree_ranks, dtype=np.int64)
@@ -240,6 +245,7 @@ def optimize_embedding(
             epoch,
             n_epochs,
             expected_active_edges,
+            schedule_by_rank,
             learning_rate,
             negative_ratio,
             lambda_rep,

@@ -200,7 +200,7 @@ def display_interactive_mst_3d(
         style={"description_width": "initial"},
     )
     n_epochs = widgets.IntSlider(
-        value=200, min=100, max=1000, step=100,
+        value=200, min=100, max=2000, step=100,
         description="Epochs", continuous_update=False,
         style={"description_width": "initial"},
     )

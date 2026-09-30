@@ -140,7 +140,7 @@ def display_interactive_embedding(
     n_epochs = widgets.IntSlider(
         value=200,
         min=50,
-        max=1000,
+        max=2000,
         step=50,
         description="Epochs",
         continuous_update=False,

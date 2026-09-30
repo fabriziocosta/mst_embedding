@@ -90,11 +90,11 @@ score a visualization if needed.
 
 The estimator computes pairwise Euclidean distances, constructs `n_msts`
 edge-disjoint minimum spanning trees, and joins their edges into one graph.
-An edge selected in tree rank `r` is scheduled once every `r` epochs on
-average. This uses the inverse-rank contribution to reduce optimizer work
-without applying a second per-edge rank multiplier. The estimator exposes the
-integer ranks as `graph_ranks_` and retains `graph_weights_ = 1 / rank` for
-inspection.
+For the approximate FAMST graph, an edge selected in tree rank `r` is scheduled
+once every `r` epochs on average. Exact Prim processes every edge each epoch and
+scales its attraction by `1 / r`. Both modes use the same normalized
+inverse-rank objective. The estimator exposes integer ranks as `graph_ranks_`
+and weights as `graph_weights_ = 1 / rank`.
 
 ### Optimize coordinates
 
@@ -104,9 +104,9 @@ attraction, `log1p(d² + epsilon)`. Sampled non-edges use logistic repulsion,
 `softplus((logistic_margin - d²) / logistic_temperature)`.
 
 `lambda_rep` sets the repulsion share of the objective; attraction receives
-`1 - lambda_rep`. Active positive and negative updates use the corresponding
-mean reductions; attraction uses the expected active-edge count
-`sum(1 / graph_ranks_)` as its normalizer. Each active positive edge contributes `negative_ratio`
+`1 - lambda_rep`. Positive and negative updates use the corresponding mean
+reductions; attraction uses `sum(1 / graph_ranks_)` as its normalizer. Each
+positive edge contributes `negative_ratio`
 sampled non-neighbors from each eligible endpoint. The CPU Numba optimizer uses
 float32 coordinates, linear learning-rate decay, and recenters once per epoch.
 It rescales the mean objective by sample count to retain a useful per-coordinate

@@ -121,11 +121,13 @@ $$
 Minimizing it brings graph-connected samples together. The MST-rank weight
 applies to positive edges only.
 
-The normalized rank-weighted objective can be estimated by activating a rank
-$r$ edge once every $r$ epochs and using rank-independent updates while it is
-active. Deterministic phases spread the higher-rank updates across epochs. The
-kernel divides active positive updates by the expected active-edge count
-$\sum_{(i,j)\in E}1/r_{ij}$; it normalizes negative updates by the eligible
+For approximate FAMST graphs, the normalized rank-weighted objective can be
+estimated by activating a rank $r$ edge once every $r$ epochs and using
+rank-independent updates while it is active. Deterministic phases spread the
+higher-rank updates across epochs. Exact Prim instead processes every edge in
+every epoch and multiplies each attraction update by its explicit inverse-rank
+weight $1/r_{ij}$. Both modes divide positive updates by
+$\sum_{(i,j)\in E}1/r_{ij}$; negative updates are normalized by the eligible
 sampled-pair count for that epoch.
 
 This logarithmic objective is the only built-in attraction. It always acts on

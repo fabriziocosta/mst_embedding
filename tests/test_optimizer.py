@@ -98,6 +98,47 @@ def test_single_sgd_update_matches_explicit_gradient_and_recenter():
     np.testing.assert_allclose(embedding, expected, rtol=1e-6, atol=1e-7)
 
 
+def test_exact_prim_uses_all_edges_with_explicit_inverse_rank_weights():
+    embedding = np.array(
+        [[0.0, 0.0], [1.0, 0.5], [2.0, -1.0], [2.5, 1.0]], dtype=np.float32
+    )
+    initial = embedding.astype(np.float64)
+    edges = np.array([[0, 1], [2, 3]], dtype=np.intp)
+    ranks = np.array([1, 2], dtype=np.int32)
+    learning_rate = 0.01
+    normalizer = 1.0 + 0.5
+    expected = initial.copy()
+    alpha = learning_rate * 5 * len(embedding)
+    for (left, right), rank in zip(edges, ranks):
+        delta = expected[left] - expected[right]
+        d2 = float(np.dot(delta, delta))
+        factor = (
+            alpha
+            * (1.0 / normalizer)
+            * (1.0 / rank)
+            * _attraction_factor(d2, 1e-4)
+        )
+        expected[left] -= factor * delta
+        expected[right] += factor * delta
+    expected -= expected.mean(axis=0)
+
+    optimize_embedding(
+        embedding,
+        edges,
+        ranks,
+        n_epochs=1,
+        learning_rate=learning_rate,
+        negative_ratio=0,
+        lambda_rep=0.0,
+        epsilon=1e-4,
+        margin=1.0,
+        temperature=0.5,
+        random_state=4,
+        schedule_by_rank=False,
+    )
+    np.testing.assert_allclose(embedding, expected, rtol=1e-6, atol=1e-7)
+
+
 def test_optimizer_is_seeded_and_supports_arbitrary_dimensions():
     edges = np.array([[0, 1], [1, 2], [2, 3]], dtype=np.intp)
     ranks = np.array([1, 1, 2], dtype=np.int32)
