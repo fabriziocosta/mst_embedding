@@ -12,6 +12,8 @@ def iterated_prim_edges(
     X: np.ndarray,
     n_msts: int,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    *,
+    return_ranks: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return exact edge-disjoint MSTs using dense Prim.
 
@@ -23,7 +25,8 @@ def iterated_prim_edges(
         raise ValueError("Pairwise distances overflowed; rescale X before fitting.")
     np.fill_diagonal(distances, 0.0)
     return iterated_prim_distance_edges(
-        distances, n_msts, progress_callback=progress_callback
+        distances, n_msts, progress_callback=progress_callback,
+        return_ranks=return_ranks,
     )
 
 
@@ -31,6 +34,8 @@ def iterated_prim_distance_edges(
     distances: np.ndarray,
     n_msts: int,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    *,
+    return_ranks: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Construct edge-disjoint MSTs from a precomputed distance matrix."""
     n_samples = distances.shape[0]
@@ -46,6 +51,7 @@ def iterated_prim_distance_edges(
     )
     edges: list[tuple[int, int]] = []
     weights: list[float] = []
+    ranks: list[int] = []
 
     for rank in range(1, n_msts + 1):
         in_tree = np.zeros(n_samples, dtype=bool)
@@ -67,6 +73,7 @@ def iterated_prim_distance_edges(
                 other = int(parent[node])
                 edges.append((other, node))
                 weights.append(1.0 / rank)
+                ranks.append(rank)
                 available[other, node >> 3] &= np.uint8(
                     0xFF ^ (1 << (node & 7))
                 )
@@ -85,7 +92,8 @@ def iterated_prim_distance_edges(
         if progress_callback is not None:
             progress_callback(rank, n_msts, "Prim")
 
-    return (
-        np.asarray(edges, dtype=np.intp).reshape(-1, 2),
-        np.asarray(weights, dtype=np.float64),
-    )
+    edge_array = np.asarray(edges, dtype=np.intp).reshape(-1, 2)
+    rank_array = np.asarray(ranks, dtype=np.int32)
+    if return_ranks:
+        return edge_array, rank_array
+    return edge_array, np.asarray(weights, dtype=np.float64)

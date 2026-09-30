@@ -89,7 +89,8 @@ samples at zero distance to remain valid MST edges.
 ## 4. Coordinate objective
 
 Each sample receives a trainable coordinate, initialized with small Gaussian
-noise. The coordinates are jointly optimized with Adam.
+noise and stored as a contiguous float32 array. A Numba-compiled SGD kernel
+updates coordinates directly.
 
 ### 4.1 Attraction on graph edges
 
@@ -120,10 +121,12 @@ $$
 Minimizing it brings graph-connected samples together. The MST-rank weight
 applies to positive edges only.
 
-Weight-sum normalization keeps the attraction scale from falling simply
-because more, lower-weight MST ranks were added. With minibatch optimization,
-the implementation scales each minibatch's weighted mean by the graph-wide
-ratio `|E| / sum(w)` to estimate this normalized objective.
+The normalized rank-weighted objective can be estimated by activating a rank
+$r$ edge once every $r$ epochs and using rank-independent updates while it is
+active. Deterministic phases spread the higher-rank updates across epochs. The
+kernel divides active positive updates by the expected active-edge count
+$\sum_{(i,j)\in E}1/r_{ij}$; it normalizes negative updates by the eligible
+sampled-pair count for that epoch.
 
 This logarithmic objective is the only built-in attraction. It always acts on
 squared Euclidean distances and uses the same edge weights and weight-sum
@@ -131,10 +134,10 @@ normalization described above.
 
 ### 4.2 Repulsion on sampled non-edges
 
-For each undirected positive edge in a minibatch, the implementation samples
-negative targets for both endpoints. This makes sampling independent of the
-arbitrary orientation used to store an edge. Targets are sampled uniformly
-from nodes that are neither the source nor one of its graph neighbors. The
+For each active undirected positive edge, the implementation samples negative
+targets for both endpoints. This makes sampling independent of the arbitrary
+orientation used to store an edge. Targets are sampled uniformly from nodes
+that are neither the source nor one of its graph neighbors. The
 squared embedding distance for a sampled pair is:
 
 $$
@@ -154,7 +157,7 @@ The negative loss is averaged over sampled pairs without MST-rank weights.
 Nearby negative pairs incur a larger cost and are pushed apart. If a graph
 has no eligible negative pairs, the repulsive term is zero for that step.
 
-The combined minibatch objective is
+The combined normalized objective is
 
 $$
 L=(1-\lambda)L_{\mathrm{attr}}+\lambda L_{\mathrm{rep}},
@@ -171,15 +174,22 @@ above. The estimator optimizes sample coordinates directly.
 
 ## 5. Optimization procedure
 
-For each epoch, the implementation shuffles the positive edges and processes
-them in minibatches. For each minibatch, it computes edge attraction, samples
-negative pairs for eligible sources, computes repulsion, and updates all
-coordinates with Adam. After each update it subtracts the coordinate mean,
-removing global translation drift without changing pairwise differences.
+For each epoch, the implementation selects edges whose rank schedule is due,
+shuffles those edges, and processes each positive pair and its negative
+samples sequentially. Linear learning-rate decay is applied across epochs.
+The normalized mean gradient is rescaled by the sample count, with a
+calibration factor chosen to match the former optimizer's default quality.
+After each epoch it subtracts the coordinate mean, removing global translation
+drift without changing pairwise differences. The Numba optimizer runs on CPU;
+`device="auto"` and `device="cpu"` select CPU, while `device="mps"` is
+unsupported. `batch_size` remains temporarily for estimator compatibility but
+is deprecated and ignored. This SGD path preserves the objective's normalized
+mean conventions, not Adam's update trajectory.
 
 The estimator uses Euclidean distance for graph construction and squared
-Euclidean distance in the embedding objective, with a fixed inverse-rank
-weight for each edge.
+Euclidean distance in the embedding objective. Rank $r$ determines update
+frequency; `graph_weights_` remains available as the corresponding $1/r$
+diagnostic.
 
 | Parameter | Default | Role |
 | --- | ---: | --- |
@@ -187,19 +197,18 @@ weight for each edge.
 | `logistic_margin` | 1.0 | Squared-distance margin for logistic repulsion |
 | `logistic_temperature` | 0.5 | Softness of the logistic repulsion; must be positive |
 | `n_components` | 2 | Number of output dimensions |
-| `n_epochs` | 200 | Number of passes over the positive edges |
-| `batch_size` | 4096 | Positive edges per optimization step |
-| `learning_rate` | 0.05 | Adam learning rate |
+| `n_epochs` | 200 | Number of rank-scheduled optimization epochs |
+| `batch_size` | 4096 | Deprecated compatibility parameter; ignored |
+| `learning_rate` | 0.05 | Base SGD learning rate, sample-scaled and linearly decayed |
 | `negative_ratio` | 5 | Negative samples per endpoint of each positive edge |
 | `lambda_rep` | 0.5 | Repulsion share; attraction uses `1 - lambda_rep` |
 | `epsilon` | `1e-4` | Smoothing for the pairwise edge probability |
 | `random_state` | 42 | Seed for initialization, shuffling, and sampling |
-| `device` | `auto` | CPU or Apple MPS optimization backend |
+| `device` | `auto` | CPU Numba optimizer; MPS is unsupported |
 
-On macOS, `device="auto"` selects MPS for at least 2,048 samples and CPU for
-smaller datasets. MPS uses single-precision coordinates; CPU uses
-double-precision coordinates. The graph and pairwise distances are constructed
-on the CPU in either case.
+The graph and pairwise distances are constructed on the CPU. The Torch
+dependency remains for the separate inductive MLP and public reference loss
+functions; it is not used by the transductive optimizer.
 
 ## 6. Practical use
 

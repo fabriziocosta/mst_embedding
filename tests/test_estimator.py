@@ -9,7 +9,6 @@ from imste.inductive import InductiveIMSTE
 from imste._estimator import (
     _iterated_mst_edges,
     _sample_negative_targets,
-    log_attraction_loss,
 )
 
 
@@ -54,6 +53,19 @@ def test_fit_timing_diagnostics_are_finite_and_bounded():
         estimator.graph_construction_time_ + estimator.embedding_optimization_time_
         <= estimator.fit_time_
     )
+
+
+def test_progress_callback_reports_completed_epochs_in_order():
+    events = []
+    IteratedMinimumSpanningTreeEmbedder(
+        n_msts=1,
+        n_epochs=3,
+        random_state=5,
+        mst_method="prim",
+        negative_ratio=0,
+        progress_callback=lambda completed, total: events.append((completed, total)),
+    ).fit(small_data())
+    assert events == [(1, 3), (2, 3), (3, 3)]
 
 
 def test_seed_reproduces_embedding():
@@ -171,16 +183,11 @@ def test_no_eligible_negative_pairs_is_supported():
     assert np.isfinite(estimator.embedding_).all()
 
 
-@pytest.mark.skipif(
-    not (torch.backends.mps.is_built() and torch.backends.mps.is_available()),
-    reason="PyTorch MPS is unavailable",
-)
-def test_mps_device_runs_when_available():
-    estimator = IteratedMinimumSpanningTreeEmbedder(
-        n_msts=1, n_epochs=2, random_state=5, device="mps"
-    ).fit(small_data())
-    assert estimator.device_ == "mps"
-    assert np.isfinite(estimator.embedding_).all()
+def test_mps_device_is_rejected_by_cpu_numba_optimizer():
+    with pytest.raises(ValueError, match="unsupported by the CPU Numba optimizer"):
+        IteratedMinimumSpanningTreeEmbedder(
+            n_msts=1, n_epochs=0, random_state=5, device="mps"
+        ).fit(small_data())
 
 
 @pytest.mark.parametrize(
@@ -258,31 +265,11 @@ def test_representative_count_is_passed_to_mst_builder(monkeypatch):
     assert captured["representatives_per_component"] == 3
 
 
-def test_attraction_uses_global_weight_sum_scale(monkeypatch):
-    X = small_data()
-    observed_weights = []
-    original_log_attraction_loss = log_attraction_loss
-
-    def capture_attraction_weights(positive_squared_distances, edge_weights, epsilon):
-        observed_weights.extend(edge_weights.detach().cpu().numpy())
-        return original_log_attraction_loss(
-            positive_squared_distances, edge_weights, epsilon
-        )
-
-    monkeypatch.setattr(
-        "imste._estimator.log_attraction_loss", capture_attraction_weights
-    )
-
+def test_graph_ranks_preserve_inverse_rank_weights():
     estimator = IteratedMinimumSpanningTreeEmbedder(
-        n_msts=2,
-        n_epochs=1,
-        batch_size=100,
-        negative_ratio=0,
-        random_state=3,
-    ).fit(X)
-
-    expected = estimator.graph_weights_ * (
-        len(estimator.graph_weights_) / estimator.graph_weights_.sum()
+        n_msts=2, n_epochs=0, mst_method="prim", random_state=3
+    ).fit(small_data())
+    assert set(estimator.graph_ranks_) == {1, 2}
+    np.testing.assert_array_equal(
+        estimator.graph_weights_, 1.0 / estimator.graph_ranks_
     )
-    np.testing.assert_allclose(np.sort(observed_weights), np.sort(expected))
-    assert np.isclose(np.sum(observed_weights), len(estimator.graph_weights_))

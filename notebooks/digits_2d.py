@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import time
-import sys
 import traceback
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from IPython.display import HTML, clear_output, display
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
@@ -82,7 +80,7 @@ def display_interactive_embedding(
 
     Dataset choices load lazily and cache balanced sample pools with separate,
     disjoint training and novel rows. Controls configure sample count, MST
-    count, MST builder, embedding batch size, epoch count, logistic-loss settings, and
+    count, MST builder, epoch count, logistic-loss settings, and
     negative sampling.
     The estimator menu selects transductive IMSTE or its inductive MLP
     extension. Attraction uses fixed weight-sum normalization. Fits use the
@@ -126,7 +124,7 @@ def display_interactive_embedding(
         f"Default selection: {initial_sample_count:,} samples, 15 MSTs with "
         "approximate FAMST, "
         "squared distance, log attraction, logistic repulsion, "
-        "weight_sum normalization, 200 epochs, and an 8,192 embedding batch. "
+        "weight_sum normalization, and 200 epochs. "
         "Click Fit embedding to run."
     )
 
@@ -136,15 +134,6 @@ def display_interactive_embedding(
         max=max_training_instances,
         step=250,
         description="Instances",
-        continuous_update=False,
-        style={"description_width": "initial"},
-    )
-    batch_size = widgets.IntSlider(
-        value=8192,
-        min=256,
-        max=32768,
-        step=256,
-        description="Embedding batch size",
         continuous_update=False,
         style={"description_width": "initial"},
     )
@@ -257,15 +246,9 @@ def display_interactive_embedding(
         [mlp_n_layers, mlp_layer_size, mlp_dropout]
     )
     projection_controls.layout.display = "none"
-    mps_backend = getattr(torch.backends, "mps", None)
-    mps_available = bool(
-        sys.platform == "darwin"
-        and mps_backend is not None
-        and mps_backend.is_available()
-    )
-    device_default = "mps" if mps_available else "auto"
+    device_default = "auto"
     device = widgets.Dropdown(
-        options=["auto", "cpu"] + (["mps"] if mps_available else []),
+        options=["auto", "cpu"],
         value=device_default,
         description="Device",
         style={"description_width": "initial"},
@@ -460,7 +443,6 @@ def display_interactive_embedding(
         logistic_temperature.value = 0.5
         negative_ratio.value = 5
         compute_knn.value = False
-        batch_size.value = 8192
         n_epochs.value = 200
         embedding_type.value = "transductive"
         mlp_n_layers.value = 6
@@ -522,7 +504,6 @@ def display_interactive_embedding(
                     mst_max_neighbors=mst_max_neighbors.value,
                     n_components=2,
                     n_epochs=epochs,
-                    batch_size=batch_size.value,
                     learning_rate=0.05,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
@@ -603,7 +584,7 @@ def display_interactive_embedding(
                     title=(
                         f"2D IMSTE · {DATASET_LABELS[active_dataset['name']]} · "
                         f"{n_samples:,} samples · "
-                        f"{n_msts.value} MSTs · inverse-rank weights · "
+                        f"{n_msts.value} MSTs · rank-scheduled updates · "
                         f"{mst_method.value.upper()} · "
                         "squared distance · log attraction · "
                         "logistic repulsion · weight_sum · "
@@ -671,7 +652,6 @@ def display_interactive_embedding(
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([mst_method]),
             widgets.HBox([mst_max_neighbors]),
-            widgets.HBox([batch_size]),
             widgets.HBox([n_epochs]),
             widgets.HBox([lambda_rep, negative_ratio]),
             widgets.HBox([logistic_margin, logistic_temperature]),
@@ -703,7 +683,6 @@ def display_interactive_embedding(
         "sliders": {
             "dataset": dataset,
             "sample_count": sample_count,
-            "batch_size": batch_size,
             "n_epochs": n_epochs,
             "n_msts": n_msts,
             "mst_method": mst_method,

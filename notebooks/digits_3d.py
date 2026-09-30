@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import time
-import sys
 import traceback
 
 import ipywidgets as widgets
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import torch
 from IPython.display import clear_output, display
 from sklearn.manifold import trustworthiness
 from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -28,7 +26,6 @@ def fit_and_plot_mst_3d(
     labels,
     n_msts=15,
     n_epochs=200,
-    batch_size=4096,
     learning_rate=0.05,
     negative_ratio=5,
     lambda_rep=0.5,
@@ -50,7 +47,6 @@ def fit_and_plot_mst_3d(
         n_msts=n_msts,
         n_components=3,
         n_epochs=n_epochs,
-        batch_size=batch_size,
         learning_rate=learning_rate,
         negative_ratio=negative_ratio,
         lambda_rep=lambda_rep,
@@ -61,7 +57,7 @@ def fit_and_plot_mst_3d(
     )
     print(
         f"Fitting 3D IMSTE embedding with n_msts={n_msts}, "
-        "fixed inverse-rank weighting ...",
+        "rank-scheduled edge updates ...",
         flush=True,
     )
     started = time.perf_counter()
@@ -208,11 +204,6 @@ def display_interactive_mst_3d(
         description="Epochs", continuous_update=False,
         style={"description_width": "initial"},
     )
-    batch_size = widgets.IntSlider(
-        value=4096, min=256, max=8192, step=256,
-        description="Batch size", continuous_update=False,
-        style={"description_width": "initial"},
-    )
     learning_rate = widgets.FloatSlider(
         value=0.05, min=0.01, max=0.10, step=0.01,
         readout_format=".2f", description="Learning rate",
@@ -245,15 +236,9 @@ def display_interactive_mst_3d(
         description="Trustworthiness k", continuous_update=False,
         style={"description_width": "initial"},
     )
-    mps_backend = getattr(torch.backends, "mps", None)
-    mps_available = bool(
-        sys.platform == "darwin"
-        and mps_backend is not None
-        and mps_backend.is_available()
-    )
-    device_default = "mps" if mps_available else "auto"
+    device_default = "auto"
     device = widgets.Dropdown(
-        options=["auto", "cpu"] + (["mps"] if mps_available else []),
+        options=["auto", "cpu"],
         value=device_default,
         description="Device",
         style={"description_width": "initial"},
@@ -276,7 +261,6 @@ def display_interactive_mst_3d(
         n_msts.value = 15
         mst_method.value = "famst"
         n_epochs.value = 200
-        batch_size.value = 4096
         learning_rate.value = 0.05
         negative_ratio.value = 5
         lambda_rep.value = 0.5
@@ -300,7 +284,6 @@ def display_interactive_mst_3d(
                     n_msts=n_msts.value,
                     mst_method=mst_method.value,
                     n_epochs=n_epochs.value,
-                    batch_size=batch_size.value,
                     learning_rate=learning_rate.value,
                     negative_ratio=negative_ratio.value,
                     lambda_rep=lambda_rep.value,
@@ -324,7 +307,7 @@ def display_interactive_mst_3d(
         [
             widgets.HBox([sample_count, n_msts]),
             widgets.HBox([mst_method]),
-            widgets.HBox([n_epochs, batch_size, learning_rate]),
+            widgets.HBox([n_epochs, learning_rate]),
             widgets.HBox([negative_ratio, lambda_rep, epsilon]),
             widgets.HBox([random_state_slider, trustworthiness_neighbors, device]),
         ]
@@ -341,7 +324,6 @@ def display_interactive_mst_3d(
             "n_msts": n_msts,
             "mst_method": mst_method,
             "n_epochs": n_epochs,
-            "batch_size": batch_size,
             "learning_rate": learning_rate,
             "negative_ratio": negative_ratio,
             "lambda_rep": lambda_rep,

@@ -10,7 +10,6 @@ from urllib.request import urlretrieve
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import torch
 from IPython.display import display
 from sklearn.datasets import fetch_openml, get_data_home
 from sklearn.model_selection import train_test_split
@@ -163,8 +162,7 @@ def _plot_dataset_examples(
 
 
 def _default_device() -> str:
-    mps = getattr(torch.backends, "mps", None)
-    return "mps" if mps is not None and mps.is_available() else "auto"
+    return "auto"
 
 
 def run_high_dim_mst_gallery(
@@ -172,7 +170,6 @@ def run_high_dim_mst_gallery(
     max_samples: int = 1000,
     n_msts: int = 15,
     n_epochs: int = 200,
-    batch_size: int = 4096,
     negative_ratio: int = 5,
     lambda_rep: float = 0.5,
     sample_plot_rows: int = 2,
@@ -216,7 +213,6 @@ def run_high_dim_mst_gallery(
                         n_msts=n_msts,
                         n_components=2,
                         n_epochs=n_epochs,
-                        batch_size=batch_size,
                         learning_rate=0.05,
                         negative_ratio=negative_ratio,
                         lambda_rep=lambda_rep,

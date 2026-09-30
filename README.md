@@ -90,8 +90,11 @@ score a visualization if needed.
 
 The estimator computes pairwise Euclidean distances, constructs `n_msts`
 edge-disjoint minimum spanning trees, and joins their edges into one graph.
-An edge selected in tree rank `r` receives weight `1 / r`, so edges from later
-trees contribute less to attraction.
+An edge selected in tree rank `r` is scheduled once every `r` epochs on
+average. This uses the inverse-rank contribution to reduce optimizer work
+without applying a second per-edge rank multiplier. The estimator exposes the
+integer ranks as `graph_ranks_` and retains `graph_weights_ = 1 / rank` for
+inspection.
 
 ### Optimize coordinates
 
@@ -101,9 +104,15 @@ attraction, `log1p(d² + epsilon)`. Sampled non-edges use logistic repulsion,
 `softplus((logistic_margin - d²) / logistic_temperature)`.
 
 `lambda_rep` sets the repulsion share of the objective; attraction receives
-`1 - lambda_rep`. Positive edge losses are normalized by the total graph-edge
-weight. Negative losses use an unweighted mean. Each positive edge contributes
-`negative_ratio` sampled non-neighbors from each endpoint.
+`1 - lambda_rep`. Active positive and negative updates use the corresponding
+mean reductions; attraction uses the expected active-edge count
+`sum(1 / graph_ranks_)` as its normalizer. Each active positive edge contributes `negative_ratio`
+sampled non-neighbors from each eligible endpoint. The CPU Numba optimizer uses
+float32 coordinates, linear learning-rate decay, and recenters once per epoch.
+It rescales the mean objective by sample count to retain a useful per-coordinate
+SGD step size.
+Fixed seeds reproduce a run with the same implementation; coordinates need
+not match the former Adam optimizer.
 
 The default `mst_method="famst"` builds an approximate sparse graph. It can
 increase the neighbor count as needed, subject to `mst_max_neighbors`. Select
@@ -166,7 +175,7 @@ embedding and do not extend or re-optimize its graph.
 | `n_msts` | `15` | Number of edge-disjoint spanning trees |
 | `n_components` | `2` | Embedding dimensions |
 | `n_epochs` | `200` | Coordinate-optimization epochs |
-| `batch_size` | `4096` | Positive graph edges per optimization step |
+| `batch_size` | `4096` | Deprecated compatibility parameter; ignored by sequential SGD |
 | `learning_rate` | `0.05` | Coordinate optimizer learning rate |
 | `negative_ratio` | `5` | Non-neighbors sampled per endpoint of each positive edge |
 | `lambda_rep` | `0.5` | Repulsion share, from 0 to 1 |
@@ -174,16 +183,15 @@ embedding and do not extend or re-optimize its graph.
 | `logistic_temperature` | `0.5` | Logistic repulsion softness; must be positive |
 | `epsilon` | `1e-4` | Smoothing for the logarithmic attraction |
 | `random_state` | `42` | Seed for initialization, shuffling, and sampling |
-| `device` | `"auto"` | `"cpu"`, `"mps"`, or automatic selection |
+| `device` | `"auto"` | `"auto"` and `"cpu"` select CPU; MPS is unsupported |
 | `mst_method` | `"famst"` | Sparse approximate `"famst"` or exact dense `"prim"` |
 | `mst_neighbors` | `15` | Initial ANN neighbors for FAMST |
 | `mst_inter_component_edges` | `5` | Candidate connections per FAMST component pair |
 | `mst_representatives_per_component` | `10` | Maximum representatives per component for selecting FAMST bridge pairs |
 | `mst_max_neighbors` | `None` | FAMST neighbor cap; defaults to four times `mst_neighbors` |
 
-For `device="auto"`, macOS uses PyTorch MPS for datasets with at least 2,048
-rows; smaller datasets use the CPU. Other systems use the CPU. The selected
-device is available as `mapper.device_` after fitting.
+The selected device is available as `mapper.device_` after fitting. The
+transductive optimizer runs on CPU; `device="mps"` raises a clear error.
 
 ### MLP parameters
 
@@ -203,6 +211,10 @@ optimization by passing an `IteratedMinimumSpanningTreeEmbedder` as `embedder`.
 
 ## Notebooks
 
+- [Performance refactor benchmark](benchmarks/performance_refactor.py): report
+  separate FAMST, optimizer, and total fit medians with neighborhood metrics,
+  alongside a comparable UMAP run. Local reference results are in
+  [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 - [MST scaling benchmark](notebooks/mst_scaling_benchmark.ipynb): compare exact
   Prim with approximate FAMST graph construction over increasing dataset sizes.
 - [Interactive 2D embedding](notebooks/digits_2d_interactive.ipynb): choose a
